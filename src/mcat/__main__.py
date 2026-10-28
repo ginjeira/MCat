@@ -145,7 +145,7 @@ async def main():
     bot_entity = await client.get_entity(BOT_USERNAME)
     if DESTINATION:
         try:
-            destination_ref = int(DESTINATION) if re.fullmatch(r"-?\\d+", DESTINATION) else DESTINATION
+            destination_ref = int(DESTINATION) if re.fullmatch(r"-?\d+, DESTINATION) else DESTINATION
             destination_entity = await client.get_entity(destination_ref)
         except Exception as exc:
             print(f"Aviso: não consegui resolver TG_DESTINATION ({exc}). Configura o destino corretamente.")
