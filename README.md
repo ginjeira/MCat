@@ -59,7 +59,7 @@ Na primeira execução, o Telegram pede autenticação. A sessão local permite 
 7. Quando o bot terminar de enviar as músicas, escreve /disarm na consola.
 8. Consulta /status e exporta os registos com /export catalogo.csv.
 
-**Cuidado:** enquanto o encaminhamento estiver armado, todas as novas mensagens recebidas desse bot serão encaminhadas para o destino configurado, incluindo eventuais mensagens de texto. Desarma-o assim que a playlist terminar. Faz primeiro o teste com uma playlist pequena e um chat de destino de teste.
+**Cuidado:** enquanto o encaminhamento estiver armado, todas as novas mensagens com media recebidas desse bot serão encaminhadas para o destino configurado; as mensagens apenas de texto não são encaminhadas. Desarma-o assim que a playlist terminar. Faz primeiro o teste com uma playlist pequena e um chat de destino de teste.
 
 ## Comandos
 
@@ -76,7 +76,7 @@ Na primeira execução, o Telegram pede autenticação. A sessão local permite 
 
 - A seleção de Playlist e de resultados é manual.
 - O encaminhamento é controlado explicitamente por /arm e /disarm; não tenta inferir sozinho quando uma playlist começa ou termina.
-- O protótipo regista mensagens Telegram e metadados mínimos. Não inspeciona nem descarrega o conteúdo dos ficheiros.
+- O protótipo regista mensagens Telegram e metadados mínimos. Não inspeciona nem descarrega o conteúdo dos ficheiros. Apenas mensagens com media são encaminhadas durante a janela armada.
 - A deteção de duplicados de texto é apenas heurística. Não elimina mensagens nem versões automaticamente.
 - A versão atual encaminha cada mensagem à medida que chega; mensagens agrupadas podem não manter o agrupamento visual original.
 - Respeita os limites do Telegram, as condições do bot e os direitos aplicáveis aos conteúdos que obténs e partilhas.
