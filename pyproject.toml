@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "mcat"
 version = "0.1.0"
 description = "Telegram playlist catalog and message-forwarding proof of concept"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
   "Telethon>=1.36,<2.0",
   "python-dotenv>=1.0,<2.0",
