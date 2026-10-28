@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcat"
+version = "0.1.0"
+description = "Telegram playlist catalog and message-forwarding proof of concept"
+requires-python = ">=3.11"
+dependencies = [
+  "Telethon>=1.36,<2.0",
+  "python-dotenv>=1.0,<2.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
