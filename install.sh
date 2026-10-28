@@ -12,7 +12,7 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$APP_DIR"
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -e .
 mkdir -p data
 if [[ ! -f .env ]]; then
   cp .env.example .env
@@ -21,4 +21,4 @@ if [[ ! -f .env ]]; then
 else
   echo ".env já existe; não foi alterado."
 fi
-echo "Instalação concluída. Edita $APP_DIR/.env e executa: $APP_DIR/.venv/bin/python -m mcat"
+echo "Instalação concluída. Edita $APP_DIR/.env e executa: cd $APP_DIR && .venv/bin/python -m mcat"
