@@ -160,7 +160,7 @@ async def main():
         dest_id = None
         dest_ids = None
         error = None
-        if forwarding_armed:
+        if forwarding_armed and message.media:
             if destination_entity is None:
                 error = "TG_DESTINATION não está configurado ou não foi resolvido"
                 print(f"\n[ERRO] msg={message.id}: {error}")
