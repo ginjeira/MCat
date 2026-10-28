@@ -16,7 +16,7 @@ Prova de conceito para observar o bot Telegram Music Downloader, catalogar as me
 
 ## Instalação num LXC Debian/Ubuntu
 
-Recomendado: LXC dedicado, Debian 12 ou Ubuntu 24.04, 1 vCPU, 1 GB RAM e 8 GB de disco para a PoC.
+Recomendado: LXC dedicado, Ubuntu 22.04/24.04 ou Debian 12, 1 vCPU, 1 GB RAM e 8 GB de disco para a PoC.
 
     apt update
     apt install -y git
