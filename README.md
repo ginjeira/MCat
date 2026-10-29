@@ -11,6 +11,8 @@ Prova de conceito para observar o bot Telegram Music Downloader, catalogar as me
 - Indexa o histórico de GinjMusic para deduplicar pelo ID do documento Telegram.
 - `/arm` recolhe em simulação; `/live` autoriza encaminhamento real depois de `Finished`.
 - `/music-check` indexa o histórico acessível do destino. A API não expõe diretamente a vista Music da aplicação.
+- `/duplicates` audita o histórico do destino e lista documentos de áudio repetidos e possíveis correspondências por título/intérprete, sem alterar nem apagar mensagens.
+- Uma diferença entre o número anunciado e o observado é reportada, mas não bloqueia automaticamente o processamento.
 
 ## Estado da versão 0.1
 
@@ -62,19 +64,23 @@ Na primeira execução, o Telegram pede autenticação. A sessão local permite 
 2. Na consola, escreve /search Portugal Pop Acústico.
 3. No Telegram, seleciona manualmente o modo Playlist.
 4. Quando aparecerem os resultados, decide qual playlist queres testar.
-5. **Antes de clicar no número da playlist**, escreve /arm na consola. Isto ativa o encaminhamento das próximas mensagens recebidas do bot.
-6. Clica no resultado da playlist no Telegram.
-7. Quando o bot terminar de enviar as músicas, escreve /disarm na consola.
-8. Consulta /status e exporta os registos com /export catalogo.csv.
+5. Escreve `/music-check` para atualizar o índice do histórico de destino, se necessário.
+6. Antes de clicar no número da playlist, escreve `/arm`. O MCat recolhe a playlist em modo de simulação por omissão.
+7. Clica no resultado da playlist no Telegram e aguarda a mensagem `Finished`.
+8. Revê os resumos `[DEDUP]` e `[RESULTADO]`. O `/live` autoriza o encaminhamento real de uma única playlist; não o uses até verificares os números.
+9. Usa `/duplicates` para auditar repetições no destino, `/status` para estatísticas ou `/export catalogo.csv` para exportar registos.
 
-**Cuidado:** enquanto o encaminhamento estiver armado, todas as novas mensagens com media recebidas desse bot serão encaminhadas para o destino configurado; as mensagens apenas de texto não são encaminhadas. Desarma-o assim que a playlist terminar. Faz primeiro o teste com uma playlist pequena e um chat de destino de teste.
+**Cuidado:** `/arm` inicia a recolha da playlist em simulação; não envia mensagens. `/live` muda a playlist em curso para encaminhamento real até ao respetivo `Finished`, e o modo de simulação é reposto no final. Testa primeiro numa playlist pequena e verifica o destino antes de usar o modo real.
 
 ## Comandos
 
 - /search <termo> — envia a pesquisa ao bot.
 - /tag <etiqueta> — etiqueta as mensagens seguintes.
-- /arm — ativa o encaminhamento automático das próximas mensagens do bot.
-- /disarm — desativa o encaminhamento.
+- /arm — arma a recolha de uma playlist em modo de simulação.
+- /live — autoriza o encaminhamento real da playlist em curso até `Finished`.
+- /disarm — desativa a recolha de novas playlists.
+- /music-check — atualiza o índice de documentos no histórico do destino.
+- /duplicates — audita duplicados de áudio no destino; só leitura.
 - /status — mostra contagens.
 - /export <ficheiro.csv> — exporta o inventário.
 - /help — ajuda.
@@ -83,8 +89,9 @@ Na primeira execução, o Telegram pede autenticação. A sessão local permite 
 ## Limitações conhecidas
 
 - A seleção de Playlist e de resultados é manual.
-- O encaminhamento é controlado explicitamente por /arm e /disarm; não tenta inferir sozinho quando uma playlist começa ou termina.
-- O protótipo regista mensagens Telegram e metadados mínimos. Não inspeciona nem descarrega o conteúdo dos ficheiros. Apenas mensagens com media são encaminhadas durante a janela armada.
+- O MCat identifica o início/fim da playlist através de `Total Tracks:` e `Finished`; a escolha da playlist continua manual.
+- A deduplicação exata usa o ID do documento Telegram. A auditoria por título/intérprete é indicativa e pode agrupar edições diferentes da mesma música.
+- O protótipo regista mensagens Telegram e metadados mínimos. Não inspeciona nem descarrega o conteúdo dos ficheiros.
 - A deteção de duplicados de texto é apenas heurística. Não elimina mensagens nem versões automaticamente.
 - A versão atual encaminha cada mensagem à medida que chega; mensagens agrupadas podem não manter o agrupamento visual original.
 - Respeita os limites do Telegram, as condições do bot e os direitos aplicáveis aos conteúdos que obténs e partilhas.
