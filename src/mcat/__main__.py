@@ -287,7 +287,7 @@ async def main():
             forwarding_armed = False
             break
         if command == "/help":
-            print("/search <termo>   envia uma pesquisa ao bot\n/tag <etiqueta>   etiqueta as mensagens seguintes\n/arm             recolhe playlist em simulação\n/live            autoriza encaminhamento real\n/disarm           desativa recolha\n/music-check      indexa históricos usados para deduplicação\n/music-audit      compara filtro Music com histórico completo\n/music-search-audit compara paginação SearchRequest com iter_messages\n/music-detail-audit inventaria atributos e exporta CSV\n/duplicates       audita duplicados de áudio (só leitura)\n/status           estatísticas\n/export <ficheiro.csv> exportação CSV\n/help             ajuda\n/quit             sair")
+print("/search <termo>   envia uma pesquisa ao bot\n/hist-music-find <termo> pesquisa título/intérprete nos históricos (só leitura)\n/tag <etiqueta>   etiqueta as mensagens seguintes\n/arm             recolhe playlist em simulação\n/live            autoriza encaminhamento real\n/disarm           desativa recolha\n/music-check      indexa históricos usados para deduplicação\n/music-audit      compara filtro Music com histórico completo\n/music-search-audit compara paginação SearchRequest com iter_messages\n/music-detail-audit inventaria atributos e exporta CSV\n/duplicates       audita duplicados de áudio (só leitura)\n/status           estatísticas\n/export <ficheiro.csv> exportação CSV\n/help             ajuda\n/quit             sair")
         elif command == "/search":
             if not args:
                 print("Uso: /search <termo>")
@@ -449,6 +449,62 @@ async def main():
             print("[MUSIC-DETAIL-AUDIT] Classes de atributos: " + (", ".join(f"{k}={v}" for k, v in sorted(attr_counts.items())) or "(nenhuma)"))
             print(f"[MUSIC-DETAIL-AUDIT] Inventário detalhado: {path.resolve()}")
             print("[MUSIC-DETAIL-AUDIT] Nenhuma mensagem foi alterada.")
+        elif command == "/hist-music-find":
+            if not args:
+                print("Uso: /hist-music-find <artista, título ou termos>")
+                continue
+            query = norm(" ".join(args))
+            query_terms = query.split()
+            print(f"[HIST-MUSIC-FIND] Pesquisa={query!r}; a consultar metadados dos históricos configurados...")
+            records = []
+            for dedup_entity in dedup_entities:
+                chat_count = 0
+                try:
+                    async for history_message in client.iter_messages(dedup_entity, limit=None, filter=InputMessagesFilterMusic):
+                        record = audio_metadata(history_message)
+                        if not record:
+                            continue
+                        record["chat_id"] = dedup_entity.id
+                        record["chat_title"] = getattr(dedup_entity, "title", str(dedup_entity.id))
+                        haystack = norm(" ".join((record.get("performer") or "", record.get("title") or "")))
+                        if all(term in haystack for term in query_terms):
+                            records.append(record)
+                            chat_count += 1
+                    print(f"[HIST-MUSIC-FIND] Chat={dedup_entity.id} ({getattr(dedup_entity, 'title', str(dedup_entity.id))}); correspondências={chat_count}.")
+                except Exception as exc:
+                    print(f"[HIST-MUSIC-FIND] ERRO ao consultar chat {getattr(dedup_entity, 'id', '?')}: {type(exc).__name__}: {exc}")
+            if not records:
+                print("[HIST-MUSIC-FIND] Nenhuma correspondência encontrada nos metadados de áudio acessíveis.")
+            else:
+                # Collapse copies of the same Telegram document while retaining every message location.
+                by_document = {}
+                for record in records:
+                    by_document.setdefault(record["document_id"], []).append(record)
+                metadata_keys = {}
+                for doc_id, copies in by_document.items():
+                    first = copies[0]
+                    key = (norm(first.get("performer", "")), norm(first.get("title", "")))
+                    if key != ("", ""):
+                        metadata_keys.setdefault(key, []).append((doc_id, copies))
+                print(f"[HIST-MUSIC-FIND] Mensagens correspondentes={len(records)}; documentos distintos={len(by_document)}.")
+                print("[HIST-MUSIC-FIND] Resultados (título — intérprete; chat:mensagem):")
+                shown = 0
+                for doc_id, copies in sorted(by_document.items(), key=lambda pair: (norm(pair[1][0].get("title", "")), norm(pair[1][0].get("performer", "")), pair[0])):
+                    first = copies[0]
+                    title = first.get("title") or "(sem título)"
+                    performer = first.get("performer") or "(intérprete desconhecido)"
+                    locations = ", ".join(f"{item['chat_id']}:{item['message_id']}" for item in copies)
+                    mime = first.get("mime_type") or "MIME desconhecido"
+                    print(f"  {title} — {performer}; mensagens={locations}; document_id={doc_id}; MIME={mime}")
+                    shown += 1
+                    if shown >= 40:
+                        break
+                if len(by_document) > 40:
+                    print(f"  ... mais {len(by_document) - 40} documentos não apresentados.")
+                multi_file = [items for items in metadata_keys.values() if len(items) > 1]
+                if multi_file:
+                    print(f"[HIST-MUSIC-FIND] Atenção: {sum(len(items) for items in multi_file)} documentos agrupados em {len(multi_file)} conjuntos com o mesmo título/intérprete mas IDs de ficheiro diferentes.")
+            print("[HIST-MUSIC-FIND] Pesquisa apenas de leitura; nenhuma mensagem foi alterada, enviada ou apagada.")
         elif command == "/duplicates":
             if destination_entity is None:
                 print("Destino não resolvido; verifica TG_DESTINATION.")
