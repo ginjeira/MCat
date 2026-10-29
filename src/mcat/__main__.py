@@ -265,7 +265,7 @@ async def main():
             forwarding_armed = False
             break
         if command == "/help":
-            print("/search <termo>   envia uma pesquisa ao bot\n/tag <etiqueta>   etiqueta as mensagens seguintes\n/arm             recolhe playlist em simulação\n/live            autoriza encaminhamento real\n/disarm           desativa recolha\n/music-check      indexa histórico de música de GinjMusic\n/duplicates       audita duplicados de áudio (só leitura)\n/status           estatísticas\n/export <ficheiro.csv> exportação CSV\n/help             ajuda\n/quit             sair")
+            print("/search <termo>   envia uma pesquisa ao bot\n/tag <etiqueta>   etiqueta as mensagens seguintes\n/arm             recolhe playlist em simulação\n/live            autoriza encaminhamento real\n/disarm           desativa recolha\n/music-check      indexa histórico de música de GinjMusic\n/music-audit      compara filtro Music com histórico completo\n/duplicates       audita duplicados de áudio (só leitura)\n/status           estatísticas\n/export <ficheiro.csv> exportação CSV\n/help             ajuda\n/quit             sair")
         elif command == "/search":
             if not args:
                 print("Uso: /search <termo>")
@@ -294,6 +294,39 @@ async def main():
             destination_indexed = True
             total = db.execute("SELECT COUNT(DISTINCT document_id) n FROM destination_media WHERE destination_chat_id=?",(destination_entity.id,)).fetchone()["n"]
             print(f"Indexadas {count} mensagens multimédia; {total} identificadores distintos. A API consulta o histórico, não a vista Music da aplicação.")
+        elif command == "/music-audit":
+            if destination_entity is None:
+                print("Destino não resolvido; verifica TG_DESTINATION.")
+                continue
+            print("[MUSIC-AUDIT] A comparar filtro Music com o histórico completo; só metadados, sem downloads...")
+            filtered_ids = set()
+            async for item in client.iter_messages(destination_entity, limit=None, filter=InputMessagesFilterMusic):
+                filtered_ids.add(item.id)
+            audio_records = []
+            scanned = 0
+            async for item in client.iter_messages(destination_entity, limit=None):
+                scanned += 1
+                record = audio_metadata(item)
+                if record:
+                    audio_records.append(record)
+            audio_by_id = {record["message_id"]: record for record in audio_records}
+            audio_ids = set(audio_by_id)
+            audio_not_in_filter = sorted(audio_ids - filtered_ids, reverse=True)
+            filter_not_detected_as_audio = sorted(filtered_ids - audio_ids, reverse=True)
+            print(f"[MUSIC-AUDIT] Mensagens totais analisadas={scanned}.")
+            print(f"[MUSIC-AUDIT] Itens devolvidos pelo filtro Music={len(filtered_ids)}.")
+            print(f"[MUSIC-AUDIT] Mensagens com atributos de áudio/MIME audio identificadas no histórico completo={len(audio_ids)}.")
+            print(f"[MUSIC-AUDIT] Áudios detetados fora do filtro Music={len(audio_not_in_filter)}.")
+            for message_id in audio_not_in_filter[:30]:
+                record = audio_by_id[message_id]
+                label = " — ".join(part for part in (record.get("performer"), record.get("title")) if part) or "(sem título/intérprete)"
+                print(f"  [FORA DO FILTRO] mensagem={message_id}; {label}; MIME={record.get('mime_type') or 'desconhecido'}")
+            if len(audio_not_in_filter) > 30:
+                print(f"  ... mais {len(audio_not_in_filter) - 30} mensagens de áudio não apresentadas.")
+            print(f"[MUSIC-AUDIT] Itens do filtro sem áudio identificado pelo nosso extrator={len(filter_not_detected_as_audio)}.")
+            if filter_not_detected_as_audio:
+                print("  IDs de exemplo: " + ", ".join(str(mid) for mid in filter_not_detected_as_audio[:30]))
+            print("[MUSIC-AUDIT] Auditoria apenas de leitura; nenhuma mensagem foi alterada.")
         elif command == "/duplicates":
             if destination_entity is None:
                 print("Destino não resolvido; verifica TG_DESTINATION.")
