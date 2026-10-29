@@ -345,6 +345,17 @@ async def main():
                 # switched the search mode to playlists (usually via MessageEdited).
                 if is_playlist_results and choice_matches:
                     row_index, column_index, label = choice_matches[0]
+                    button_object = message.buttons[row_index][column_index]
+                    raw_button = getattr(button_object, "button", button_object)
+                    button_type = getattr(raw_button, "type", None)
+                    callback_data = getattr(button_type, "data", None)
+                    print(
+                        f"\n[AUTO-CHOICE-DEBUG] mensagem={message.id}; opção={label!r}; "
+                        f"button_type={type(button_type).__name__}; "
+                        f"callback_data={callback_data!r}; "
+                        f"callback_bytes={len(callback_data) if isinstance(callback_data, bytes) else None}"
+                    )
+                    callback_error = None
                     try:
                         callback_result = await send_inline_callback(message, row_index, column_index)
                         print(
@@ -354,16 +365,28 @@ async def main():
                             f"alerta={getattr(callback_result, 'alert', None)!r}; "
                             f"url={getattr(callback_result, 'url', None)!r}"
                         )
-                        auto_playlist_stage = None
-                        await asyncio.sleep(1.0)
-                        refreshed = await client.get_messages(bot_entity, ids=message.id)
-                        refreshed_text = (refreshed.message or "") if refreshed else ""
-                        print(
-                            f"[AUTO-VERIFY-CHOICE] mensagem={message.id}; "
-                            f"texto_origem={refreshed_text[:180]!r}"
-                        )
                     except Exception as exc:
-                        print(f"\n[AUTO-CLICK] Falha ao selecionar a playlist {label!r}: {type(exc).__name__}: {exc}")
+                        callback_error = exc
+                        print(
+                            f"\n[AUTO-CLICK] Callback da playlist {label!r} falhou: "
+                            f"{type(exc).__name__}: {exc}"
+                        )
+
+                    # A timeout is not proof that the bot ignored the callback.
+                    # Inspect recent bot messages before reporting whether it progressed.
+                    await asyncio.sleep(1.0)
+                    recent = await client.get_messages(bot_entity, limit=8)
+                    newer = [
+                        item for item in (recent or [])
+                        if item.id > message.id
+                    ]
+                    print(
+                        f"[AUTO-VERIFY-CHOICE] mensagem_origem={message.id}; "
+                        f"mensagens_posteriores={[(item.id, (item.message or '')[:120]) for item in newer]!r}"
+                    )
+                    if callback_error is None:
+                        auto_playlist_stage = None
+                    else:
                         auto_playlist_stage = None
                 else:
                     print("[AUTO-TRACE] À espera dos resultados de playlists; não foi clicada nenhuma opção numerada.")
