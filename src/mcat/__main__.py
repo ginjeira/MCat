@@ -12,6 +12,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
+from telethon.tl.types import InputMessagesFilterMusic
 
 load_dotenv()
 
@@ -186,7 +187,7 @@ async def main():
             else:
                 if not destination_indexed:
                     print("[DEDUP] A indexar histórico de GinjMusic (sem descarregar ficheiros)...")
-                    index_destination_media(db, destination_entity.id, [m async for m in client.iter_messages(destination_entity, limit=None)])
+                    index_destination_media(db, destination_entity.id, [m async for m in client.iter_messages(destination_entity, limit=None, filter=InputMessagesFilterMusic)])
                     destination_indexed = True
                 items=db.execute("SELECT * FROM playlist_items WHERE playlist_id=? ORDER BY position",(active["id"],)).fetchall()
                 # Snapshot do destino antes de processar esta playlist, para que
@@ -264,7 +265,7 @@ async def main():
             forwarding_armed = False
             break
         if command == "/help":
-            print("/search <termo>   envia uma pesquisa ao bot\n/tag <etiqueta>   etiqueta as mensagens seguintes\n/arm             recolhe playlist em simulação\n/live            autoriza encaminhamento real\n/disarm           desativa recolha\n/music-check      indexa histórico de GinjMusic\n/status           estatísticas\n/export <ficheiro.csv> exportação CSV\n/help             ajuda\n/quit             sair")
+            print("/search <termo>   envia uma pesquisa ao bot\n/tag <etiqueta>   etiqueta as mensagens seguintes\n/arm             recolhe playlist em simulação\n/live            autoriza encaminhamento real\n/disarm           desativa recolha\n/music-check      indexa histórico de música de GinjMusic\n/duplicates       audita duplicados de áudio (só leitura)\n/status           estatísticas\n/export <ficheiro.csv> exportação CSV\n/help             ajuda\n/quit             sair")
         elif command == "/search":
             if not args:
                 print("Uso: /search <termo>")
@@ -289,7 +290,7 @@ async def main():
             if destination_entity is None:
                 print("Destino não resolvido; verifica TG_DESTINATION.")
                 continue
-            count = index_destination_media(db,destination_entity.id,[m async for m in client.iter_messages(destination_entity,limit=None)])
+            count = index_destination_media(db,destination_entity.id,[m async for m in client.iter_messages(destination_entity,limit=None,filter=InputMessagesFilterMusic)])
             destination_indexed = True
             total = db.execute("SELECT COUNT(DISTINCT document_id) n FROM destination_media WHERE destination_chat_id=?",(destination_entity.id,)).fetchone()["n"]
             print(f"Indexadas {count} mensagens multimédia; {total} identificadores distintos. A API consulta o histórico, não a vista Music da aplicação.")
@@ -300,7 +301,7 @@ async def main():
             print("[DUPLICATES] A analisar o histórico acessível de GinjMusic (só metadados; sem descarregar ficheiros)...")
             records = []
             scanned = 0
-            async for history_message in client.iter_messages(destination_entity, limit=None):
+            async for history_message in client.iter_messages(destination_entity, limit=None, filter=InputMessagesFilterMusic):
                 scanned += 1
                 record = audio_metadata(history_message)
                 if record:
