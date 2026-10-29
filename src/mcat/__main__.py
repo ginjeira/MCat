@@ -201,55 +201,42 @@ async def main():
         message = event.message
         text = message.message or ""
 
-        # Drive the bot's inline-keyboard flow through Telegram callbacks.
-        # MessageEdited is also handled because some bots edit the same message
-        # after a callback instead of sending a new one.
+        # Diagnostic-only pass: report exact eligibility and predicate results
+        # before re-enabling any automated Telegram callbacks.
         if auto_playlist_stage:
-            button_labels = [
-                (getattr(button, "text", "") or "").strip()
-                for row in (getattr(message, "buttons", None) or [])
-                for button in row
+            buttons = [
+                (row_index, column_index, (getattr(button, "text", "") or "").strip())
+                for row_index, row in enumerate(getattr(message, "buttons", None) or [])
+                for column_index, button in enumerate(row)
             ]
-            normalized_labels = [norm(label) for label in button_labels]
+            normalized_labels = [norm(label) for _, _, label in buttons]
+            eligible = message.id > auto_min_message_id
+            playlist_matches = [
+                (row_index, column_index, label, norm(label))
+                for row_index, column_index, label in buttons
+                if norm(label) in {"playlist", "playlists"}
+            ]
+            target = str(auto_choice_number)
+            choice_matches = [
+                (row_index, column_index, label)
+                for row_index, column_index, label in buttons
+                if re.fullmatch(r"\D*" + re.escape(target) + r"\D*", label.strip())
+            ]
             print(
-                f"\\n[AUTO-DEBUG] Evento={type(event).__name__}; mensagem={message.id}; "
-                f"limite={auto_min_message_id}; etapa={auto_playlist_stage}; "
-                f"texto={text[:160]!r}; botões={button_labels!r}; "
-                f"normalizados={normalized_labels!r}"
+                f"\n[AUTO-DEBUG] Evento={type(event).__name__}; mensagem={message.id}; "
+                f"limite={auto_min_message_id}; elegível={eligible}; etapa={auto_playlist_stage}; "
+                f"texto={text[:160]!r}; botões={[label for _, _, label in buttons]!r}; "
+                f"normalizados={normalized_labels!r}; "
+                f"matches_playlist={playlist_matches!r}; matches_opção_{target}={choice_matches!r}"
             )
-        if auto_playlist_stage and message.id > auto_min_message_id:
-            if auto_playlist_stage == "wait_playlist":
-                match = find_inline_button(
-                    message,
-                    # The bot labels the category button "☑️ Playlists"
-                    # (plural, with a state emoji), not simply "Playlist".
-                    lambda label: norm(label) in {"playlist", "playlists"},
-                )
-                if match:
-                    row_index, column_index, label = match
-                    # Set the next state before clicking: callback updates may
-                    # arrive immediately and be delivered as MessageEdited.
-                    auto_playlist_stage = "wait_choice"
-                    try:
-                        await message.click(i=row_index, j=column_index)
-                        print(f"\\n[AUTO-CLICK] Selecionado botão {label!r}; à espera das opções numeradas.")
-                    except Exception as exc:
-                        auto_playlist_stage = None
-                        print(f"\\n[AUTO-CLICK] Falha ao clicar em {label!r}: {type(exc).__name__}: {exc}")
+            if not eligible:
+                print("[AUTO-TRACE] Ignorada: ID da mensagem não é superior ao limite.")
+            elif auto_playlist_stage == "wait_playlist":
+                print("[AUTO-TRACE] Diagnóstico apenas: nenhum clique executado. "
+                      f"Correspondências de categoria encontradas={len(playlist_matches)}.")
             elif auto_playlist_stage == "wait_choice":
-                target = str(auto_choice_number)
-                match = find_inline_button(
-                    message,
-                    lambda label: bool(re.fullmatch(r"\D*" + re.escape(target) + r"\D*", label.strip())),
-                )
-                if match:
-                    row_index, column_index, label = match
-                    auto_playlist_stage = None
-                    try:
-                        await message.click(i=row_index, j=column_index)
-                        print(f"\\n[AUTO-CLICK] Selecionada automaticamente a opção {label!r}.")
-                    except Exception as exc:
-                        print(f"\\n[AUTO-CLICK] Falha ao clicar na opção {label!r}: {type(exc).__name__}: {exc}")
+                print("[AUTO-TRACE] Diagnóstico apenas: nenhum clique executado. "
+                      f"Correspondências para a opção {target}={len(choice_matches)}.")
 
         if not forwarding_armed:
             save_observation(message)
