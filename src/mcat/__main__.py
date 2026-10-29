@@ -21,6 +21,7 @@ API_ID_RAW = os.getenv("TG_API_ID", "").strip()
 API_HASH = os.getenv("TG_API_HASH", "").strip()
 BOT_USERNAME = os.getenv("TG_BOT_USERNAME", "").strip().lstrip("@")
 DESTINATION = os.getenv("TG_DESTINATION", "").strip()
+DEDUP_SOURCES_RAW = os.getenv("TG_DEDUP_SOURCES", "").strip()
 DB_PATH = Path(os.getenv("DB_PATH", "./data/mcat.sqlite3")).expanduser()
 
 if not API_ID_RAW or not API_HASH or not BOT_USERNAME:
@@ -39,6 +40,7 @@ current_label = "sem-etiqueta"
 forwarding_armed = False
 bot_entity = None
 destination_entity = None
+dedup_entities = []
 
 
 def now_iso():
@@ -144,7 +146,7 @@ def export_csv(path):
 
 
 async def main():
-    global current_query, current_label, forwarding_armed, bot_entity, destination_entity
+    global current_query, current_label, forwarding_armed, bot_entity, destination_entity, dedup_entities
     init_db()
     await client.start()
     bot_entity = await client.get_entity(BOT_USERNAME)
@@ -154,7 +156,24 @@ async def main():
             destination_entity = await client.get_entity(destination_ref)
         except Exception as exc:
             print(f"Aviso: não consegui resolver TG_DESTINATION ({exc}). Configura o destino corretamente.")
+    # O destino atual recebe os envios; fontes adicionais são usadas apenas para deduplicação.
+    dedup_entities = []
+    if destination_entity is not None:
+        dedup_entities.append(destination_entity)
+    for raw_ref in re.split(r"[,;]", DEDUP_SOURCES_RAW):
+        raw_ref = raw_ref.strip()
+        if not raw_ref:
+            continue
+        try:
+            source_ref = int(raw_ref) if raw_ref.lstrip("-").isdigit() else raw_ref
+            entity = await client.get_entity(source_ref)
+            if all(getattr(existing, "id", None) != getattr(entity, "id", None) for existing in dedup_entities):
+                dedup_entities.append(entity)
+        except Exception as exc:
+            print(f"Aviso: não consegui resolver uma fonte de deduplicação {raw_ref!r} ({exc}); será ignorada.")
     print(f"MCat ligado. Bot observado: @{BOT_USERNAME}")
+    print("Destino de envio: " + (str(destination_entity.id) if destination_entity is not None else "(não resolvido)"))
+    print("Chats consultados para deduplicação: " + (", ".join(str(entity.id) for entity in dedup_entities) or "(nenhum)"))
     print("Modo inicial: encaminhamento DESARMADO. Não são descarregados nem processados ficheiros de áudio.")
     print("Usa /help para comandos. Para encaminhar, configura TG_DESTINATION e usa /arm antes de selecionar uma playlist no Telegram.\n")
 
@@ -187,16 +206,18 @@ async def main():
                 print("[DRY-RUN] Destino não resolvido; nada foi enviado.")
             else:
                 if not destination_indexed:
-                    print("[DEDUP] A indexar histórico de GinjMusic (sem descarregar ficheiros)...")
-                    index_destination_media(db, destination_entity.id, [m async for m in client.iter_messages(destination_entity, limit=None, filter=InputMessagesFilterMusic)])
+                    print("[DEDUP] A indexar históricos para redundância (sem descarregar ficheiros)...")
+                    for dedup_entity in dedup_entities:
+                        count = index_destination_media(db, dedup_entity.id, [m async for m in client.iter_messages(dedup_entity, limit=None, filter=InputMessagesFilterMusic)])
+                        print(f"[DEDUP] Chat {dedup_entity.id}: {count} mensagens de música indexadas.")
                     destination_indexed = True
                 items=db.execute("SELECT * FROM playlist_items WHERE playlist_id=? ORDER BY position",(active["id"],)).fetchall()
                 # Snapshot do destino antes de processar esta playlist, para que
                 # um envio durante o ciclo não passe a contar como preexistente.
                 existing_ids = {
                     row["document_id"] for row in db.execute(
-                        "SELECT DISTINCT document_id FROM destination_media WHERE destination_chat_id=?",
-                        (destination_entity.id,),
+                        "SELECT DISTINCT document_id FROM destination_media WHERE destination_chat_id IN (" + ",".join("?" for _ in dedup_entities) + ")",
+                        tuple(entity.id for entity in dedup_entities),
                     ).fetchall()
                 }
                 seen_playlist_ids = set()
@@ -266,7 +287,7 @@ async def main():
             forwarding_armed = False
             break
         if command == "/help":
-            print("/search <termo>   envia uma pesquisa ao bot\n/tag <etiqueta>   etiqueta as mensagens seguintes\n/arm             recolhe playlist em simulação\n/live            autoriza encaminhamento real\n/disarm           desativa recolha\n/music-check      indexa histórico de música de GinjMusic\n/music-audit      compara filtro Music com histórico completo\n/music-search-audit compara paginação SearchRequest com iter_messages\n/music-detail-audit inventaria atributos e exporta CSV\n/duplicates       audita duplicados de áudio (só leitura)\n/status           estatísticas\n/export <ficheiro.csv> exportação CSV\n/help             ajuda\n/quit             sair")
+            print("/search <termo>   envia uma pesquisa ao bot\n/tag <etiqueta>   etiqueta as mensagens seguintes\n/arm             recolhe playlist em simulação\n/live            autoriza encaminhamento real\n/disarm           desativa recolha\n/music-check      indexa históricos usados para deduplicação\n/music-audit      compara filtro Music com histórico completo\n/music-search-audit compara paginação SearchRequest com iter_messages\n/music-detail-audit inventaria atributos e exporta CSV\n/duplicates       audita duplicados de áudio (só leitura)\n/status           estatísticas\n/export <ficheiro.csv> exportação CSV\n/help             ajuda\n/quit             sair")
         elif command == "/search":
             if not args:
                 print("Uso: /search <termo>")
@@ -291,10 +312,17 @@ async def main():
             if destination_entity is None:
                 print("Destino não resolvido; verifica TG_DESTINATION.")
                 continue
-            count = index_destination_media(db,destination_entity.id,[m async for m in client.iter_messages(destination_entity,limit=None,filter=InputMessagesFilterMusic)])
+            total_messages = 0
+            total_ids = set()
+            for dedup_entity in dedup_entities:
+                count = index_destination_media(db,dedup_entity.id,[m async for m in client.iter_messages(dedup_entity,limit=None,filter=InputMessagesFilterMusic)])
+                ids = {row["document_id"] for row in db.execute("SELECT DISTINCT document_id FROM destination_media WHERE destination_chat_id=?",(dedup_entity.id,)).fetchall()}
+                total_messages += count
+                total_ids.update(ids)
+                label = "destino de envio" if dedup_entity.id == destination_entity.id else "fonte adicional de redundância"
+                print(f"[MUSIC-CHECK] Chat={dedup_entity.id} ({label}); mensagens indexadas nesta consulta={count}; IDs distintos no índice={len(ids)}.")
             destination_indexed = True
-            total = db.execute("SELECT COUNT(DISTINCT document_id) n FROM destination_media WHERE destination_chat_id=?",(destination_entity.id,)).fetchone()["n"]
-            print(f"Indexadas {count} mensagens multimédia; {total} identificadores distintos. A API consulta o histórico, não a vista Music da aplicação.")
+            print(f"Total combinado para deduplicação: {total_messages} mensagens indexadas nesta consulta; {len(total_ids)} IDs de documento distintos. O envio continua limitado ao TG_DESTINATION.")
         elif command == "/music-audit":
             if destination_entity is None:
                 print("Destino não resolvido; verifica TG_DESTINATION.")
