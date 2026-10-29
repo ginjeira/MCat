@@ -67,22 +67,11 @@ def find_inline_button(message, predicate):
 
 
 async def click_inline_button(message, row_index, column_index):
-    """Click callback buttons from both legacy and newer Telegram keyboard schemas."""
+    """Use Telethon's MessageButton abstraction to click callback buttons."""
     button_object = message.buttons[row_index][column_index]
-    raw_button = getattr(button_object, "button", button_object)
-    button_type = getattr(raw_button, "type", None)
-    callback_data = getattr(button_type, "data", None)
-    if callback_data is not None:
-        # Newer Telegram schemas wrap callback data inside
-        # KeyboardInlineButton.type instead of exposing button.data directly.
-        return await client(
-            functions.messages.GetBotCallbackAnswerRequest(
-                peer=bot_entity,
-                msg_id=message.id,
-                data=callback_data,
-            )
-        )
-    return await message.click(i=row_index, j=column_index)
+    # Telethon 1.45 supports the newer KeyboardInlineButton.type representation.
+    # Let its own MessageButton implementation construct and send the callback.
+    return await button_object.click()
 
 
 def init_db():
