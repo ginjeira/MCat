@@ -287,7 +287,21 @@ async def main():
             forwarding_armed = False
             break
         if command == "/help":
-print("/search <termo>   envia uma pesquisa ao bot\n/hist-music-find <termo> pesquisa título/intérprete nos históricos (só leitura)\n/tag <etiqueta>   etiqueta as mensagens seguintes\n/arm             recolhe playlist em simulação\n/live            autoriza encaminhamento real\n/disarm           desativa recolha\n/music-check      indexa históricos usados para deduplicação\n/music-audit      compara filtro Music com histórico completo\n/music-search-audit compara paginação SearchRequest com iter_messages\n/music-detail-audit inventaria atributos e exporta CSV\n/duplicates       audita duplicados de áudio (só leitura)\n/status           estatísticas\n/export <ficheiro.csv> exportação CSV\n/help             ajuda\n/quit             sair")
+            print("""/search <termo>   envia uma pesquisa ao bot
+/hist-music-find <termo> pesquisa título/intérprete nos históricos (só leitura)
+/tag <etiqueta>   etiqueta as mensagens seguintes
+/arm             recolhe playlist em simulação
+/live            autoriza encaminhamento real
+/disarm           desativa recolha
+/music-check      indexa históricos usados para deduplicação
+/music-audit      compara filtro Music com histórico completo
+/music-search-audit compara paginação SearchRequest com iter_messages
+/music-detail-audit inventaria atributos e exporta CSV
+/duplicates       audita duplicados de áudio (só leitura)
+/status           estatísticas
+/export <ficheiro.csv> exportação CSV
+/help             ajuda
+/quit             sair""")
         elif command == "/search":
             if not args:
                 print("Uso: /search <termo>")
