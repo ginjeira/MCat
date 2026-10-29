@@ -5,6 +5,8 @@ import re
 import shlex
 import sqlite3
 import unicodedata
+
+from .playlist_engine import add_media, active_playlist, destination_has_media, finish_playlist, index_destination_media, init_playlist_schema, is_finished, is_playlist_start, media_document_id, start_playlist
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -73,6 +75,7 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_observations_dedup ON observations(dedup_key);
     CREATE INDEX IF NOT EXISTS idx_observations_doc ON observations(document_id);
     """)
+    init_playlist_schema(db)
     db.commit()
 
 
@@ -153,30 +156,63 @@ async def main():
     print("Modo inicial: encaminhamento DESARMADO. Não são descarregados nem processados ficheiros de áudio.")
     print("Usa /help para comandos. Para encaminhar, configura TG_DESTINATION e usa /arm antes de selecionar uma playlist no Telegram.\n")
 
+    dry_run = True
+    destination_indexed = False
+
     @client.on(events.NewMessage(chats=bot_entity))
     async def on_bot_message(event):
+        nonlocal dry_run, destination_indexed
         message = event.message
-        forwarded = False
-        dest_id = None
-        dest_ids = None
-        error = None
-        if forwarding_armed and message.media:
+        text = message.message or ""
+        start = is_playlist_start(text)
+        if start:
+            title, expected = start
+            pid = start_playlist(db, message.chat_id, message.id, title, expected)
+            print(f"\n[PLAYLIST] Início: {title!r}; Total Tracks={expected}; id={pid}")
+            save_observation(message)
+            print("> ", end="", flush=True)
+            return
+        active = active_playlist(db, message.chat_id)
+        if active and is_finished(text):
+            summary = finish_playlist(db, active["id"], message.id)
+            print(f"\n[PLAYLIST] Finished. Esperadas={summary['expected']}; observadas={summary['observed']}; únicas={summary['unique']}.")
+            if summary["note"]:
+                print(f"[VALIDAÇÃO] Aviso: {summary['note']}")
             if destination_entity is None:
-                error = "TG_DESTINATION não está configurado ou não foi resolvido"
-                print(f"\n[ERRO] msg={message.id}: {error}")
+                print("[DRY-RUN] Destino não resolvido; nada foi enviado.")
             else:
-                try:
-                    # Encaminha a mensagem Telegram original. Nenhum ficheiro é descarregado.
-                    result = await client.forward_messages(destination_entity, message)
-                    result_list = result if isinstance(result, list) else [result]
-                    forwarded = True
-                    dest_id = destination_entity.id
-                    dest_ids = ",".join(str(item.id) for item in result_list if item)
-                    print(f"\n[FORWARD] mensagem {message.id} -> destino {dest_id} (mensagens destino: {dest_ids})")
-                except Exception as exc:
-                    error = str(exc)[:500]
-                    print(f"\n[ERRO FORWARD] mensagem {message.id}: {error}")
-        save_observation(message, forwarded, dest_id, dest_ids, error)
+                if not destination_indexed:
+                    print("[DEDUP] A indexar histórico de GinjMusic (sem descarregar ficheiros)...")
+                    index_destination_media(db, destination_entity.id, await client.iter_messages(destination_entity, limit=None))
+                    destination_indexed = True
+                items=db.execute("SELECT * FROM playlist_items WHERE playlist_id=? ORDER BY position",(active["id"],)).fetchall()
+                for item in items:
+                    if destination_has_media(db,destination_entity.id,item["document_id"]):
+                        db.execute("UPDATE playlist_items SET status='duplicate' WHERE playlist_id=? AND source_message_id=?",(active["id"],item["source_message_id"]))
+                    elif dry_run:
+                        db.execute("UPDATE playlist_items SET status='dry_run' WHERE playlist_id=? AND source_message_id=?",(active["id"],item["source_message_id"]))
+                    else:
+                        try:
+                            source=await client.get_messages(bot_entity,ids=item["source_message_id"])
+                            if not source or not source.media:
+                                db.execute("UPDATE playlist_items SET status='missing',error='Mensagem indisponível' WHERE playlist_id=? AND source_message_id=?",(active["id"],item["source_message_id"]))
+                            else:
+                                sent=await client.forward_messages(destination_entity,source)
+                                sent=sent[0] if isinstance(sent,list) else sent
+                                db.execute("UPDATE playlist_items SET status='forwarded',forwarded_message_id=? WHERE playlist_id=? AND source_message_id=?",(getattr(sent,"id",None),active["id"],item["source_message_id"]))
+                                if item["document_id"] and sent:
+                                    db.execute("INSERT OR IGNORE INTO destination_media VALUES(?,?,?,?)",(destination_entity.id,item["document_id"],sent.id,now_iso()))
+                        except Exception as exc:
+                            db.execute("UPDATE playlist_items SET status='error',error=? WHERE playlist_id=? AND source_message_id=?",(str(exc)[:500],active["id"],item["source_message_id"]))
+                    db.commit()
+            print("[PLAYLIST] Concluída em modo simulação." if dry_run else "[PLAYLIST] Processamento real terminado.")
+            save_observation(message)
+            print("> ", end="", flush=True)
+            return
+        active=active_playlist(db,message.chat_id)
+        if active and message.media:
+            add_media(db,active["id"],message.chat_id,message.id,media_document_id(message))
+        save_observation(message)
         print("> ", end="", flush=True)
 
     while True:
@@ -196,7 +232,7 @@ async def main():
             forwarding_armed = False
             break
         if command == "/help":
-            print("/search <termo>   envia uma pesquisa ao bot\n/tag <etiqueta>   etiqueta as mensagens seguintes\n/arm             ativa encaminhamento automático das próximas mensagens do bot\n/disarm           desativa encaminhamento\n/status           estatísticas\n/export <ficheiro.csv> exportação CSV\n/help             ajuda\n/quit             sair")
+            print("/search <termo>   envia uma pesquisa ao bot\n/tag <etiqueta>   etiqueta as mensagens seguintes\n/arm             recolhe playlist em simulação\n/live            autoriza encaminhamento real\n/disarm           desativa recolha\n/music-check      indexa histórico de GinjMusic\n/status           estatísticas\n/export <ficheiro.csv> exportação CSV\n/help             ajuda\n/quit             sair")
         elif command == "/search":
             if not args:
                 print("Uso: /search <termo>")
@@ -209,14 +245,25 @@ async def main():
             current_label = "-".join(norm(" ".join(args)).split()) if args else "sem-etiqueta"
             print(f"Etiqueta atual: {current_label}")
         elif command == "/arm":
-            if destination_entity is None:
-                print("Encaminhamento não ativado: configura TG_DESTINATION em .env e reinicia a aplicação.")
-                continue
             forwarding_armed = True
-            print("ENCAMINHAMENTO ATIVO. As próximas mensagens recebidas do bot serão encaminhadas. Usa /disarm quando terminar.")
+            print("RECOLHA ATIVA. Aguarda Total Tracks e Finished; modo simulação por omissão.")
+        elif command == "/live":
+            if destination_entity is None or not forwarding_armed:
+                print("Para modo real, configura o destino e usa /arm.")
+                continue
+            dry_run = False
+            print("MODO REAL: as faixas novas serão encaminhadas quando chegar Finished.")
+        elif command == "/music-check":
+            if destination_entity is None:
+                print("Destino não resolvido; verifica TG_DESTINATION.")
+                continue
+            count = index_destination_media(db,destination_entity.id,await client.iter_messages(destination_entity,limit=None))
+            destination_indexed = True
+            total = db.execute("SELECT COUNT(DISTINCT document_id) n FROM destination_media WHERE destination_chat_id=?",(destination_entity.id,)).fetchone()["n"]
+            print(f"Indexadas {count} mensagens multimédia; {total} identificadores distintos. A API consulta o histórico, não a vista Music da aplicação.")
         elif command == "/disarm":
             forwarding_armed = False
-            print("Encaminhamento desativado.")
+            print("Recolha desativada. O processamento termina quando chega Finished.")
         elif command == "/status":
             print_status()
         elif command == "/export":

@@ -4,6 +4,14 @@ Prova de conceito para observar o bot Telegram Music Downloader, catalogar as me
 
 **Não descarrega, lê, converte nem processa o conteúdo dos ficheiros de áudio.** Quando o encaminhamento está ativado, o Telethon encaminha a própria mensagem Telegram.
 
+## Estado da versão 0.2 — recolha por playlist
+
+- Deteta início por `Total Tracks:` e fim por `Finished`.
+- Persiste playlists e mensagens multimédia em SQLite e valida contagem.
+- Indexa o histórico de GinjMusic para deduplicar pelo ID do documento Telegram.
+- `/arm` recolhe em simulação; `/live` autoriza encaminhamento real depois de `Finished`.
+- `/music-check` indexa o histórico acessível do destino. A API não expõe diretamente a vista Music da aplicação.
+
 ## Estado da versão 0.1
 
 - Liga-se à conta Telegram através do Telethon.
