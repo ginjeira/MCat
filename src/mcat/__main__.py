@@ -345,7 +345,7 @@ async def main():
                 result = await client(SearchRequest(
                     peer=destination_entity,
                     q="",
-                    filter=InputMessagesFilterMusic,
+                    filter=InputMessagesFilterMusic(),
                     min_date=None,
                     max_date=None,
                     offset_id=offset_id,
