@@ -225,7 +225,7 @@ async def main():
                 target = str(auto_choice_number)
                 match = find_inline_button(
                     message,
-                    lambda label: bool(re.fullmatch(r"\D*" + re.escape(target) + r"\\D*", label.strip())),
+                    lambda label: bool(re.fullmatch(r"\D*" + re.escape(target) + r"\D*", label.strip())),
                 )
                 if match:
                     row_index, column_index, label = match
