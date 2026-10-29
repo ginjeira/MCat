@@ -8,7 +8,7 @@ Prova de conceito para observar o bot Telegram Music Downloader, catalogar as me
 
 - Deteta início por `Total Tracks:` e fim por `Finished`.
 - Persiste playlists e mensagens multimédia em SQLite e valida contagem.
-- Indexa o histórico de GinjMusic para deduplicar pelo ID do documento Telegram.
+- Indexa os históricos de GinjMusic e deduplica por título, intérprete e duração iguais (normalizados), independentemente do ID do ficheiro Telegram.
 - `/arm` recolhe em simulação; `/live` autoriza encaminhamento real depois de `Finished`.
 - `/music-check` e `/duplicates` consultam o destino e as fontes opcionais `TG_DEDUP_SOURCES` com o filtro oficial `InputMessagesFilterMusic`; os IDs de documento são unidos para deduplicação entre chats. `/music-audit`, `/music-search-audit` e `/music-detail-audit` continuam a auditar apenas o destino principal.
 - `/duplicates` audita todos os chats configurados para redundância e lista documentos de áudio repetidos e possíveis correspondências por título/intérprete, sem alterar nem apagar mensagens.
@@ -93,7 +93,7 @@ Na primeira execução, o Telegram pede autenticação. A sessão local permite 
 
 - A seleção de Playlist e de resultados é manual.
 - O MCat identifica o início/fim da playlist através de `Total Tracks:` e `Finished`; a escolha da playlist continua manual.
-- A deduplicação exata usa o ID do documento Telegram. A auditoria por título/intérprete é indicativa e pode agrupar edições diferentes da mesma música.
+- A deduplicação de faixas exige título, intérprete e duração iguais; o ID do documento Telegram é registado para auditoria, mas não define sozinho se duas faixas são duplicadas. Registos sem os três campos não são tratados como duplicados automaticamente.
 - O protótipo regista mensagens Telegram e metadados mínimos. Não inspeciona nem descarrega o conteúdo dos ficheiros.
 - A deteção de duplicados de texto é apenas heurística. Não elimina mensagens nem versões automaticamente.
 - A versão atual encaminha cada mensagem à medida que chega; mensagens agrupadas podem não manter o agrupamento visual original.
