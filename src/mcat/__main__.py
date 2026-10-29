@@ -240,7 +240,17 @@ async def main():
                 )
                 if is_track_results and unchecked:
                     row_index, column_index, label = unchecked
+                    button_object = message.buttons[row_index][column_index]
+                    raw_button = getattr(button_object, "button", button_object)
+                    callback_data = getattr(raw_button, "data", None)
                     auto_playlist_stage = "wait_choice"
+                    print(
+                        f"\\n[AUTO-BUTTON] classe={type(button_object).__name__}; "
+                        f"classe_interna={type(raw_button).__name__}; "
+                        f"tem_callback_data={callback_data is not None}; "
+                        f"callback_data_bytes={len(callback_data) if isinstance(callback_data, bytes) else None}; "
+                        f"url={getattr(raw_button, 'url', None)!r}"
+                    )
                     try:
                         callback_result = await message.click(i=row_index, j=column_index)
                         print(
