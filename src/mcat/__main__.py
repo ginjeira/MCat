@@ -82,7 +82,7 @@ async def click_inline_button(message, row_index, column_index):
                 data=callback_data,
             )
         )
-    return await click_inline_button(message, row_index, column_index)
+    return await message.click(i=row_index, j=column_index)
 
 
 def init_db():
