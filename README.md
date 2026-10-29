@@ -10,8 +10,8 @@ Prova de conceito para observar o bot Telegram Music Downloader, catalogar as me
 - Persiste playlists e mensagens multimédia em SQLite e valida contagem.
 - Indexa o histórico de GinjMusic para deduplicar pelo ID do documento Telegram.
 - `/arm` recolhe em simulação; `/live` autoriza encaminhamento real depois de `Finished`.
-- `/music-check` e `/duplicates` consultam o histórico do destino com o filtro oficial `InputMessagesFilterMusic`, usado pela API para procurar mensagens de música. `/music-audit` compara esse filtro com o histórico completo e identifica mensagens com atributos de áudio que ficaram fora do filtro.
-- `/duplicates` audita o histórico do destino e lista documentos de áudio repetidos e possíveis correspondências por título/intérprete, sem alterar nem apagar mensagens.
+- `/music-check` e `/duplicates` consultam o destino e as fontes opcionais `TG_DEDUP_SOURCES` com o filtro oficial `InputMessagesFilterMusic`; os IDs de documento são unidos para deduplicação entre chats. `/music-audit`, `/music-search-audit` e `/music-detail-audit` continuam a auditar apenas o destino principal.
+- `/duplicates` audita todos os chats configurados para redundância e lista documentos de áudio repetidos e possíveis correspondências por título/intérprete, sem alterar nem apagar mensagens.
 - Uma diferença entre o número anunciado e o observado é reportada, mas não bloqueia automaticamente o processamento.
 
 ## Estado da versão 0.1
@@ -47,10 +47,11 @@ Preenche:
     TG_API_ID=123456
     TG_API_HASH=coloca_aqui_o_api_hash
     TG_BOT_USERNAME=nome_de_utilizador_do_bot
-    TG_DESTINATION=@nome_do_canal_ou_chat
+    TG_DESTINATION=-1001234567890
+    TG_DEDUP_SOURCES=-1234567890
     DB_PATH=./data/mcat.sqlite3
 
-TG_DESTINATION pode ser um username resolúvel pelo Telegram ou um identificador que a conta consiga aceder. Não partilhes .env, ficheiros .session ou códigos de autenticação.
+`TG_DESTINATION` é o único chat que recebe novas músicas. `TG_DEDUP_SOURCES` é opcional e aceita IDs/username de chats antigos separados por vírgulas; estes chats são consultados apenas para detetar redundância, nunca recebem encaminhamentos. A conta Telegram tem de conseguir aceder a cada chat. Não partilhes `.env`, ficheiros `.session` ou códigos de autenticação.
 
 ## Executar
 
@@ -79,8 +80,8 @@ Na primeira execução, o Telegram pede autenticação. A sessão local permite 
 - /arm — arma a recolha de uma playlist em modo de simulação.
 - /live — autoriza o encaminhamento real da playlist em curso até `Finished`.
 - /disarm — desativa a recolha de novas playlists.
-- /music-check — atualiza o índice de mensagens de música no histórico do destino.
-- /duplicates — audita duplicados de áudio no destino; só leitura.
+- /music-check — atualiza os índices de música do destino e das fontes adicionais de redundância.
+- /duplicates — audita duplicados de áudio em todos os chats usados para redundância; só leitura.
 - /status — mostra contagens.
 - /export <ficheiro.csv> — exporta o inventário.
 - /help — ajuda.
