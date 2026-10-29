@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, functions
 from telethon.tl.functions.messages import SearchRequest
 from telethon.tl.types import InputMessagesFilterMusic
 
@@ -64,6 +64,25 @@ def find_inline_button(message, predicate):
             if predicate(label):
                 return row_index, column_index, label
     return None
+
+
+async def click_inline_button(message, row_index, column_index):
+    """Click callback buttons from both legacy and newer Telegram keyboard schemas."""
+    button_object = message.buttons[row_index][column_index]
+    raw_button = getattr(button_object, "button", button_object)
+    button_type = getattr(raw_button, "type", None)
+    callback_data = getattr(button_type, "data", None)
+    if callback_data is not None:
+        # Newer Telegram schemas wrap callback data inside
+        # KeyboardInlineButton.type instead of exposing button.data directly.
+        return await client(
+            functions.messages.GetBotCallbackAnswerRequest(
+                peer=bot_entity,
+                msg_id=message.id,
+                data=callback_data,
+            )
+        )
+    return await click_inline_button(message, row_index, column_index)
 
 
 def init_db():
@@ -242,7 +261,7 @@ async def main():
                     row_index, column_index, label = unchecked
                     button_object = message.buttons[row_index][column_index]
                     raw_button = getattr(button_object, "button", button_object)
-                    callback_data = getattr(raw_button, "data", None)
+                    button_type = getattr(raw_button, "type", None)\n                    callback_data = getattr(button_type, "data", None)
                     auto_playlist_stage = "wait_choice"
                     print(
                         f"\\n[AUTO-BUTTON] classe={type(button_object).__name__}; "
@@ -255,7 +274,7 @@ async def main():
                         f"module={type(raw_button).__module__}"
                     )
                     try:
-                        callback_result = await message.click(i=row_index, j=column_index)
+                        callback_result = await click_inline_button(message, row_index, column_index)
                         print(
                             f"\n[AUTO-CLICK] Pedido de clique enviado para {label!r}; "
                             f"resposta={type(callback_result).__name__}; "
