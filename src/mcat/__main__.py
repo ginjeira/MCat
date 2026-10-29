@@ -38,6 +38,9 @@ client = TelegramClient("mcat_user_session", API_ID, API_HASH)
 current_query = ""
 current_label = "sem-etiqueta"
 forwarding_armed = False
+auto_playlist_stage = None
+auto_choice_number = 1
+auto_min_message_id = 0
 bot_entity = None
 destination_entity = None
 dedup_entities = []
@@ -51,6 +54,16 @@ def norm(value):
     value = unicodedata.normalize("NFKD", (value or "").casefold())
     value = "".join(c for c in value if not unicodedata.combining(c))
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", value)).strip()
+
+
+def find_inline_button(message, predicate):
+    """Return (row, column, text) for the first inline button matching predicate."""
+    for row_index, row in enumerate(getattr(message, "buttons", None) or []):
+        for column_index, button in enumerate(row):
+            label = (getattr(button, "text", "") or "").strip()
+            if predicate(label):
+                return row_index, column_index, label
+    return None
 
 
 def init_db():
@@ -180,11 +193,49 @@ async def main():
     dry_run = True
     destination_indexed = False
 
+    @client.on(events.MessageEdited(chats=bot_entity))
     @client.on(events.NewMessage(chats=bot_entity))
     async def on_bot_message(event):
         nonlocal dry_run, destination_indexed
+        global auto_playlist_stage, auto_choice_number, auto_min_message_id
         message = event.message
         text = message.message or ""
+
+        # Drive the bot's inline-keyboard flow through Telegram callbacks.
+        # MessageEdited is also handled because some bots edit the same message
+        # after a callback instead of sending a new one.
+        if auto_playlist_stage and message.id > auto_min_message_id:
+            if auto_playlist_stage == "wait_playlist":
+                match = find_inline_button(
+                    message,
+                    lambda label: norm(label) == "playlist",
+                )
+                if match:
+                    row_index, column_index, label = match
+                    # Set the next state before clicking: callback updates may
+                    # arrive immediately and be delivered as MessageEdited.
+                    auto_playlist_stage = "wait_choice"
+                    try:
+                        await message.click(i=row_index, j=column_index)
+                        print(f"\\n[AUTO-CLICK] Selecionado botão {label!r}; à espera das opções numeradas.")
+                    except Exception as exc:
+                        auto_playlist_stage = None
+                        print(f"\\n[AUTO-CLICK] Falha ao clicar em {label!r}: {type(exc).__name__}: {exc}")
+            elif auto_playlist_stage == "wait_choice":
+                target = str(auto_choice_number)
+                match = find_inline_button(
+                    message,
+                    lambda label: label.strip().rstrip(".):") == target,
+                )
+                if match:
+                    row_index, column_index, label = match
+                    auto_playlist_stage = None
+                    try:
+                        await message.click(i=row_index, j=column_index)
+                        print(f"\\n[AUTO-CLICK] Selecionada automaticamente a opção {label!r}.")
+                    except Exception as exc:
+                        print(f"\\n[AUTO-CLICK] Falha ao clicar na opção {label!r}: {type(exc).__name__}: {exc}")
+
         if not forwarding_armed:
             save_observation(message)
             return
@@ -312,7 +363,8 @@ async def main():
             forwarding_armed = False
             break
         if command == "/help":
-            print("""/search <termo>   envia uma pesquisa ao bot
+            print("""/search <termo> [n] pesquisa e seleciona automaticamente Playlist e a opção n (por omissão 1)
+/hist-music-find <termo> pesquisa título/intérprete nos históricos (só leitura)
 /hist-music-find <termo> pesquisa título/intérprete nos históricos (só leitura)
 /tag <etiqueta>   etiqueta as mensagens seguintes
 /arm             recolhe playlist em simulação
@@ -329,12 +381,28 @@ async def main():
 /quit             sair""")
         elif command == "/search":
             if not args:
-                print("Uso: /search <termo>")
+                print("Uso: /search <termo> [número_da_opção]")
                 continue
-            current_query = " ".join(args)
+            if args[-1].isdigit() and len(args) > 1:
+                auto_choice_number = int(args[-1])
+                query_parts = args[:-1]
+            else:
+                auto_choice_number = 1
+                query_parts = args
+            current_query = " ".join(query_parts).strip()
+            if not current_query:
+                print("Uso: /search <termo> [número_da_opção]")
+                continue
             current_label = norm(current_query).replace(" ", "-") or "sem-etiqueta"
-            await client.send_message(bot_entity, current_query)
-            print("Pesquisa enviada. Seleciona manualmente o modo Playlist e o resultado no Telegram.")
+            auto_playlist_stage = "wait_playlist"
+            forwarding_armed = True
+            dry_run = True
+            sent_query = await client.send_message(bot_entity, current_query)
+            auto_min_message_id = sent_query.id
+            print(
+                f"Pesquisa enviada. MCat vai clicar automaticamente em 'Playlist' e na opção "
+                f"{auto_choice_number}; recolha ativa em modo simulação."
+            )
         elif command == "/tag":
             current_label = "-".join(norm(" ".join(args)).split()) if args else "sem-etiqueta"
             print(f"Etiqueta atual: {current_label}")
