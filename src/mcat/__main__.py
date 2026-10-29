@@ -164,6 +164,9 @@ async def main():
         nonlocal dry_run, destination_indexed
         message = event.message
         text = message.message or ""
+        if not forwarding_armed:
+            save_observation(message)
+            return
         start = is_playlist_start(text)
         if start:
             title, expected = start
@@ -183,7 +186,7 @@ async def main():
             else:
                 if not destination_indexed:
                     print("[DEDUP] A indexar histórico de GinjMusic (sem descarregar ficheiros)...")
-                    index_destination_media(db, destination_entity.id, await client.iter_messages(destination_entity, limit=None))
+                    index_destination_media(db, destination_entity.id, [m async for m in client.iter_messages(destination_entity, limit=None)])
                     destination_indexed = True
                 items=db.execute("SELECT * FROM playlist_items WHERE playlist_id=? ORDER BY position",(active["id"],)).fetchall()
                 for item in items:
@@ -257,7 +260,7 @@ async def main():
             if destination_entity is None:
                 print("Destino não resolvido; verifica TG_DESTINATION.")
                 continue
-            count = index_destination_media(db,destination_entity.id,await client.iter_messages(destination_entity,limit=None))
+            count = index_destination_media(db,destination_entity.id,[m async for m in client.iter_messages(destination_entity,limit=None)])
             destination_indexed = True
             total = db.execute("SELECT COUNT(DISTINCT document_id) n FROM destination_media WHERE destination_chat_id=?",(destination_entity.id,)).fetchone()["n"]
             print(f"Indexadas {count} mensagens multimédia; {total} identificadores distintos. A API consulta o histórico, não a vista Music da aplicação.")
