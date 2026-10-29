@@ -228,6 +228,7 @@ async def main():
             delivery = playlist_delivery_summary(db, active["id"])
             print(
                 f"[DEDUP] Já existentes em GinjMusic={delivery['existing']}; "
+                f"repetidas dentro da playlist={delivery['playlist_duplicates']}; "
                 f"novas (não existentes antes do processamento)={delivery['new']}."
             )
             print(
