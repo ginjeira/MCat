@@ -67,11 +67,41 @@ def find_inline_button(message, predicate):
 
 
 async def click_inline_button(message, row_index, column_index):
-    """Use Telethon's MessageButton abstraction to click callback buttons."""
+    """Send a callback directly and tolerate a lost callback-answer response.
+
+    Telegram can time out the callback answer even when the bot has processed the
+    click. Only retry after checking that the message still shows track results;
+    this avoids blindly toggling a filter twice.
+    """
     button_object = message.buttons[row_index][column_index]
-    # Telethon 1.45 supports the newer KeyboardInlineButton.type representation.
-    # Let its own MessageButton implementation construct and send the callback.
-    return await button_object.click()
+    raw_button = getattr(button_object, "button", button_object)
+    button_type = getattr(raw_button, "type", None)
+    callback_data = getattr(button_type, "data", None)
+    if not isinstance(callback_data, bytes):
+        # URL / non-callback buttons should retain Telethon's normal behaviour.
+        return await button_object.click()
+
+    request = functions.messages.GetBotCallbackAnswerRequest(
+        peer=message.input_chat,
+        msg_id=message.id,
+        data=callback_data,
+    )
+    try:
+        return await client(request)
+    except Exception as exc:
+        if type(exc).__name__ != "BotResponseTimeoutError":
+            raise
+
+    # A timeout is ambiguous: inspect the message before deciding whether to retry.
+    for _ in range(8):
+        await asyncio.sleep(0.75)
+        refreshed = await client.get_messages(bot_entity, ids=message.id)
+        refreshed_text = (refreshed.message or "") if refreshed else ""
+        if re.search(r"\\bin\\s+['\\\"]?playlist['\\\"]?", refreshed_text, re.I):
+            return None
+
+    # The message is still in track mode. Retry the same callback once only.
+    return await client(request)
 
 
 def init_db():
@@ -177,8 +207,7 @@ async def main():
             destination_entity = await client.get_entity(destination_ref)
         except Exception as exc:
             print(f"Aviso: não consegui resolver TG_DESTINATION ({exc}). Configura o destino corretamente.")
-    # O destino atual recebe os envios; fontes adicionais são usadas apenas para deduplicação.
-    dedup_entities = []
+    # O destino atual recebe os envios; fontes adicionais são usadas apenas para deduplicação.    dedup_entities = []
     if destination_entity is not None:
         dedup_entities.append(destination_entity)
     for raw_ref in re.split(r"[,;]", DEDUP_SOURCES_RAW):
@@ -357,8 +386,7 @@ async def main():
                 # Snapshot do destino antes de processar esta playlist, para que
                 # um envio durante o ciclo não passe a contar como preexistente.
                 existing_rows = db.execute(
-                    "SELECT DISTINCT document_id, title, performer, duration, file_size FROM destination_media WHERE destination_chat_id IN (" + ",".join("?" for _ in dedup_entities) + ")",
-                    tuple(entity.id for entity in dedup_entities),
+                    "SELECT DISTINCT document_id, title, performer, duration, file_size FROM destination_media WHERE destination_chat_id IN (" + ",".join("?" for _ in dedup_entities) + ")",                    tuple(entity.id for entity in dedup_entities),
                 ).fetchall()
                 existing_doc_ids = {row["document_id"] for row in existing_rows if row["document_id"]}
                 existing_keys = {
@@ -537,8 +565,7 @@ async def main():
             scanned = 0
             async for item in client.iter_messages(destination_entity, limit=None):
                 scanned += 1
-                record = audio_metadata(item)
-                if record:
+                record = audio_metadata(item)                if record:
                     audio_records.append(record)
             audio_by_id = {record["message_id"]: record for record in audio_records}
             audio_ids = set(audio_by_id)
@@ -717,8 +744,7 @@ async def main():
                     print(f"  ... mais {len(by_document) - 40} documentos não apresentados.")
                 multi_file = [items for items in metadata_keys.values() if len(items) > 1]
                 if multi_file:
-                    print(f"[HIST-MUSIC-FIND] Atenção: {sum(len(items) for items in multi_file)} documentos agrupados em {len(multi_file)} conjuntos com título, intérprete, duração e tamanho iguais, mas IDs de ficheiro diferentes.")
-            print("[HIST-MUSIC-FIND] Pesquisa apenas de leitura; nenhuma mensagem foi alterada, enviada ou apagada.")
+                    print(f"[HIST-MUSIC-FIND] Atenção: {sum(len(items) for items in multi_file)} documentos agrupados em {len(multi_file)} conjuntos com título, intérprete, duração e tamanho iguais, mas IDs de ficheiro diferentes.")            print("[HIST-MUSIC-FIND] Pesquisa apenas de leitura; nenhuma mensagem foi alterada, enviada ou apagada.")
         elif command == "/duplicates":
             if destination_entity is None:
                 print("Destino não resolvido; verifica TG_DESTINATION.")
