@@ -425,14 +425,19 @@ async def main():
             if destination_entity is None:
                 print("Destino não resolvido; verifica TG_DESTINATION.")
                 continue
-            print("[DUPLICATES] A analisar o histórico acessível de GinjMusic (só metadados; sem descarregar ficheiros)...")
+            print("[DUPLICATES] A analisar os históricos usados para redundância (só metadados; sem descarregar ficheiros)...")
             records = []
             scanned = 0
-            async for history_message in client.iter_messages(destination_entity, limit=None, filter=InputMessagesFilterMusic):
-                scanned += 1
-                record = audio_metadata(history_message)
-                if record:
-                    records.append(record)
+            for dedup_entity in dedup_entities:
+                chat_scanned = 0
+                async for history_message in client.iter_messages(dedup_entity, limit=None, filter=InputMessagesFilterMusic):
+                    scanned += 1
+                    chat_scanned += 1
+                    record = audio_metadata(history_message)
+                    if record:
+                        record["chat_id"] = dedup_entity.id
+                        records.append(record)
+                print(f"[DUPLICATES] Chat={dedup_entity.id}; mensagens analisadas={chat_scanned}.")
             exact_groups, metadata_groups = duplicate_groups(records)
             exact_occurrences = sum(len(group["records"]) - 1 for group in exact_groups)
             print(f"[DUPLICATES] Mensagens analisadas={scanned}; ficheiros de áudio identificados={len(records)}.")
@@ -440,7 +445,7 @@ async def main():
             for group in exact_groups[:25]:
                 first = group["records"][0]
                 label = " — ".join(part for part in (first.get("performer"), first.get("title")) if part) or "(sem título/intérprete)"
-                ids = ", ".join(str(item["message_id"]) for item in group["records"])
+                ids = ", ".join(f'{item.get("chat_id", destination_entity.id)}:{item["message_id"]}' for item in group["records"])
                 print(f"  [FICHEIRO REPETIDO] {label}; mensagens={ids}; document_id={group['document_id']}")
             if len(exact_groups) > 25:
                 print(f"  ... mais {len(exact_groups) - 25} grupos de documentos repetidos não apresentados.")
