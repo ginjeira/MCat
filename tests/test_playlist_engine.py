@@ -1,6 +1,6 @@
 import sqlite3
 import unittest
-from mcat.playlist_engine import add_media, active_playlist, destination_has_media, finish_playlist, init_playlist_schema, is_finished, is_playlist_start, start_playlist
+from mcat.playlist_engine import add_media, active_playlist, destination_has_media, finish_playlist, init_playlist_schema, is_finished, is_playlist_start, playlist_delivery_summary, start_playlist
 
 class PlaylistEngineTests(unittest.TestCase):
     def setUp(self):
@@ -26,6 +26,17 @@ class PlaylistEngineTests(unittest.TestCase):
         pid=start_playlist(self.db,123,10,"Rock",3)
         add_media(self.db,pid,123,11,"doc-a")
         self.assertIn("anunciou 3",finish_playlist(self.db,pid,12)["note"])
+    def test_delivery_summary(self):
+        pid=start_playlist(self.db,123,10,"Pop",3)
+        add_media(self.db,pid,123,11,"doc-a")
+        add_media(self.db,pid,123,12,"doc-b")
+        add_media(self.db,pid,123,13,"doc-c")
+        self.db.execute("UPDATE playlist_items SET status='duplicate' WHERE playlist_id=? AND source_message_id=11",(pid,))
+        self.db.execute("UPDATE playlist_items SET status='dry_run' WHERE playlist_id=? AND source_message_id IN (12,13)",(pid,))
+        self.db.commit()
+        result=playlist_delivery_summary(self.db,pid)
+        self.assertEqual(result,{"existing":1,"new":2,"forwarded":0,"dry_run":2,"missing":0,"errors":0})
+
     def test_dedup(self):
         self.db.execute("INSERT INTO destination_media VALUES(?,?,?,?)",(456,"doc-a",88,"now"))
         self.db.commit()
