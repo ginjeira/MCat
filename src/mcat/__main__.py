@@ -278,7 +278,7 @@ async def main():
                         try:
                             callback_result = await click_inline_button(message, row_index, column_index)
                             print(
-                                f"\\n[AUTO-CLICK] Pedido de clique enviado para {label!r}; "
+                                f"\n[AUTO-CLICK] Pedido de clique enviado para {label!r}; "
                                 f"resposta={type(callback_result).__name__}; "
                                 f"mensagem_resposta={getattr(callback_result, 'message', None)!r}; "
                                 f"alerta={getattr(callback_result, 'alert', None)!r}; "
@@ -291,7 +291,7 @@ async def main():
                                 raise
                             callback_result = None
                             print(
-                                f"\\n[AUTO-CLICK] Sem confirmação do callback "
+                                f"\n[AUTO-CLICK] Sem confirmação do callback "
                                 f"({type(callback_exc).__name__}); a verificar a mensagem."
                             )
                         # Verify the resulting state even when Telegram reports a callback timeout.
@@ -305,10 +305,10 @@ async def main():
                                 for button in row
                             ]
                             refreshed_is_playlist = bool(
-                                re.search(r"\\bin\\s+['\\\"]?playlist['\\\"]?", refreshed_text, re.I)
+                                re.search(r"\bin\s+['\"]?playlist['\"]?", refreshed_text, re.I)
                             )
                             print(
-                                f"\\n[AUTO-VERIFY] mensagem={refreshed.id}; "
+                                f"\n[AUTO-VERIFY] mensagem={refreshed.id}; "
                                 f"modo_playlist={refreshed_is_playlist}; "
                                 f"texto={refreshed_text[:180]!r}; "
                                 f"botão_playlists={[b for b in refreshed_buttons if 'playlist' in norm(b)]!r}"
@@ -318,10 +318,10 @@ async def main():
                                 print("[AUTO-VERIFY] O filtro não mudou para playlists; automatização interrompida sem selecionar nenhuma opção.")
                         else:
                             auto_playlist_stage = None
-                            print(f"\\n[AUTO-VERIFY] Não foi possível reler a mensagem {message.id}; automatização interrompida.")
+                            print(f"\n[AUTO-VERIFY] Não foi possível reler a mensagem {message.id}; automatização interrompida.")
                     except Exception as exc:
                         auto_playlist_stage = None
-                        print(f"\\n[AUTO-CLICK] Falha ao clicar/verificar {label!r}: {type(exc).__name__}: {exc}")
+                        print(f"\n[AUTO-CLICK] Falha ao clicar/verificar {label!r}: {type(exc).__name__}: {exc}")
                 else:
                     print("[AUTO-TRACE] Sem clique: a mensagem não é uma lista de faixas com o filtro Playlists desmarcado.")
             elif auto_playlist_stage == "wait_choice":
