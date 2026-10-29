@@ -18,12 +18,11 @@ Prova de conceito para observar o bot Telegram Music Downloader, catalogar as me
 ## Estado da versão 0.1
 
 - Liga-se à conta Telegram através do Telethon.
-- Envia pesquisas ao bot a partir da consola.
+- Envia pesquisas ao bot a partir da consola e tenta selecionar automaticamente botões inline `Playlist` e uma opção numerada via callbacks Telegram.
 - Observa e regista mensagens do bot numa base SQLite.
 - Regista mensagens com media sem descarregar os ficheiros.
 - Permite ativar/desativar o encaminhamento das próximas mensagens do bot.
 - Exporta os registos para CSV.
-- Mantém a seleção de modo Playlist e de resultados manual nesta fase.
 
 ## Instalação num LXC Debian/Ubuntu
 
@@ -63,20 +62,18 @@ Na primeira execução, o Telegram pede autenticação. A sessão local permite 
 ## Fluxo do primeiro teste
 
 1. Inicia a aplicação e autentica a conta.
-2. Na consola, escreve /search Portugal Pop Acústico.
-3. No Telegram, seleciona manualmente o modo Playlist.
-4. Quando aparecerem os resultados, decide qual playlist queres testar.
-5. Escreve `/music-check` para atualizar o índice do histórico de destino, se necessário.
-6. Antes de clicar no número da playlist, escreve `/arm`. O MCat recolhe a playlist em modo de simulação por omissão.
-7. Clica no resultado da playlist no Telegram e aguarda a mensagem `Finished`.
-8. Revê os resumos `[DEDUP]` e `[RESULTADO]`. O `/live` autoriza o encaminhamento real de uma única playlist; não o uses até verificares os números.
-9. Usa `/duplicates` para auditar repetições no destino, `/status` para estatísticas ou `/export catalogo.csv` para exportar registos.
+2. Na consola, escreve `/search Portugal Pop Acústico`. O MCat ativa a recolha em modo de simulação e tenta clicar automaticamente no botão inline `Playlist` e na opção numerada `1`.
+3. Para escolher outra opção numerada, indica-a no fim: `/search Portugal Pop Acústico 2`.
+4. Aguarda a mensagem `Finished` e revê os resumos `[DEDUP]` e `[RESULTADO]`.
+5. Usa `/music-check` para atualizar o índice dos históricos, se necessário.
+6. O `/live` autoriza o encaminhamento real de uma única playlist; não o uses até verificares os números.
+7. Usa `/duplicates` para auditar repetições no destino, `/status` para estatísticas ou `/export catalogo.csv` para exportar registos.
 
 **Cuidado:** `/arm` inicia a recolha da playlist em simulação; não envia mensagens. `/live` muda a playlist em curso para encaminhamento real até ao respetivo `Finished`, e o modo de simulação é reposto no final. Testa primeiro numa playlist pequena e verifica o destino antes de usar o modo real.
 
 ## Comandos
 
-- /search <termo> — envia a pesquisa ao bot.
+- /search <termo> [n] — envia a pesquisa, tenta clicar em `Playlist` e escolhe automaticamente a opção numerada `n` (por omissão, `1`); ativa recolha em modo de simulação.
 - /tag <etiqueta> — etiqueta as mensagens seguintes.
 - /arm — arma a recolha de uma playlist em modo de simulação.
 - /live — autoriza o encaminhamento real da playlist em curso até `Finished`.
@@ -91,8 +88,9 @@ Na primeira execução, o Telegram pede autenticação. A sessão local permite 
 
 ## Limitações conhecidas
 
-- A seleção de Playlist e de resultados é manual.
-- O MCat identifica o início/fim da playlist através de `Total Tracks:` e `Finished`; a escolha da playlist continua manual.
+- A seleção automática depende de o bot apresentar botões inline com o texto `Playlist` e opções numeradas reconhecíveis. Se a estrutura ou os rótulos dos botões forem diferentes, o clique automático pode não acontecer; confirma as mensagens `[AUTO-CLICK]` na consola.
+- A implementação dos cliques automáticos ainda precisa de validação com a sessão Telegram real. O modo de simulação continua a ser o comportamento inicial e não encaminha músicas.
+- O MCat identifica o início/fim da playlist através de `Total Tracks:` e `Finished`; playlists incompletas geram aviso, mas não são bloqueadas.
 - A deduplicação segue a lógica do Spotygram: considera duplicados o mesmo documento Telegram ou faixas com título, intérprete, duração e tamanho do ficheiro iguais (título/intérprete normalizados). Registos sem metadados suficientes não são agrupados por metadados.
 - O protótipo regista mensagens Telegram e metadados mínimos. Não inspeciona nem descarrega o conteúdo dos ficheiros.
 - A deteção de duplicados de texto é apenas heurística. Não elimina mensagens nem versões automaticamente.
