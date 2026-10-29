@@ -262,10 +262,10 @@ async def main():
                                 for button in row
                             ]
                             refreshed_is_playlist = bool(
-                                re.search(r"\\bin\\s+['\\"]?playlist['\\"]?", refreshed_text, re.I)
+                                re.search(r"\bin\s+['\"]?playlist['\"]?", refreshed_text, re.I)
                             )
                             print(
-                                f"\\n[AUTO-VERIFY] mensagem={refreshed.id}; "
+                                f"\n[AUTO-VERIFY] mensagem={refreshed.id}; "
                                 f"modo_playlist={refreshed_is_playlist}; "
                                 f"texto={refreshed_text[:180]!r}; "
                                 f"botão_playlists={[b for b in refreshed_buttons if 'playlist' in norm(b)]!r}"
