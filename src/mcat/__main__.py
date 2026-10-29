@@ -214,31 +214,39 @@ async def main():
                 items=db.execute("SELECT * FROM playlist_items WHERE playlist_id=? ORDER BY position",(active["id"],)).fetchall()
                 # Snapshot do destino antes de processar esta playlist, para que
                 # um envio durante o ciclo não passe a contar como preexistente.
+                existing_rows = db.execute(
+                    "SELECT DISTINCT document_id, title, performer, duration, file_size FROM destination_media WHERE destination_chat_id IN (" + ",".join("?" for _ in dedup_entities) + ")",
+                    tuple(entity.id for entity in dedup_entities),
+                ).fetchall()
+                existing_doc_ids = {row["document_id"] for row in existing_rows if row["document_id"]}
                 existing_keys = {
-                    (norm(row["title"]), norm(row["performer"]), row["duration"])
-                    for row in db.execute(
-                        "SELECT DISTINCT title, performer, duration FROM destination_media WHERE destination_chat_id IN (" + ",".join("?" for _ in dedup_entities) + ")",
-                        tuple(entity.id for entity in dedup_entities),
-                    ).fetchall()
-                    if row["title"] and row["performer"] and row["duration"] is not None
+                    (norm(row["title"]), norm(row["performer"]), row["duration"], row["file_size"])
+                    for row in existing_rows
+                    if row["title"] and row["performer"] and row["duration"] is not None and row["file_size"] is not None and row["file_size"] > 0
                 }
+                seen_doc_ids = set()
                 seen_playlist_keys = set()
                 for item in items:
                     doc_id = item["document_id"]
                     title = item["title"] or ""
                     performer = item["performer"] or ""
                     duration = item["duration"]
-                    track_key = (norm(title), norm(performer), duration)
-                    has_track_key = bool(track_key[0] and track_key[1] and duration is not None)
-                    if has_track_key and track_key in existing_keys:
+                    file_size = item["file_size"]
+                    track_key = (norm(title), norm(performer), duration, file_size)
+                    has_track_key = bool(track_key[0] and track_key[1] and duration is not None and file_size is not None and file_size > 0)
+                    if (doc_id and doc_id in existing_doc_ids) or (has_track_key and track_key in existing_keys):
                         db.execute("UPDATE playlist_items SET status='duplicate' WHERE playlist_id=? AND source_message_id=?",(active["id"],item["source_message_id"]))
-                    elif has_track_key and track_key in seen_playlist_keys:
+                    elif (doc_id and doc_id in seen_doc_ids) or (has_track_key and track_key in seen_playlist_keys):
                         db.execute("UPDATE playlist_items SET status='duplicate_in_playlist' WHERE playlist_id=? AND source_message_id=?",(active["id"],item["source_message_id"]))
                     elif dry_run:
+                        if doc_id:
+                            seen_doc_ids.add(doc_id)
                         if has_track_key:
                             seen_playlist_keys.add(track_key)
                         db.execute("UPDATE playlist_items SET status='dry_run' WHERE playlist_id=? AND source_message_id=?",(active["id"],item["source_message_id"]))
                     else:
+                        if doc_id:
+                            seen_doc_ids.add(doc_id)
                         if has_track_key:
                             seen_playlist_keys.add(track_key)
                         try:
@@ -252,9 +260,9 @@ async def main():
                                 save_observation(source, forwarded=True, dest_id=destination_entity.id, dest_message_ids=str(getattr(sent,"id","")))
                                 if item["document_id"] and sent:
                                     db.execute("""INSERT OR REPLACE INTO destination_media
-                                        (destination_chat_id,document_id,destination_message_id,seen_at,title,performer,duration)
-                                        VALUES(?,?,?,?,?,?,?)""",
-                                        (destination_entity.id,item["document_id"],sent.id,now_iso(),title,performer,duration))
+                                        (destination_chat_id,document_id,destination_message_id,seen_at,title,performer,duration,file_size)
+                                        VALUES(?,?,?,?,?,?,?,?)""",
+                                        (destination_entity.id,item["document_id"],sent.id,now_iso(),title,performer,duration,file_size))
                         except Exception as exc:
                             db.execute("UPDATE playlist_items SET status='error',error=? WHERE playlist_id=? AND source_message_id=?",(str(exc)[:500],active["id"],item["source_message_id"]))
                     db.commit()
