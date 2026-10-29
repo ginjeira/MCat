@@ -93,7 +93,7 @@ Na primeira execução, o Telegram pede autenticação. A sessão local permite 
 
 - A seleção de Playlist e de resultados é manual.
 - O MCat identifica o início/fim da playlist através de `Total Tracks:` e `Finished`; a escolha da playlist continua manual.
-- A deduplicação de faixas exige título, intérprete e duração iguais; o ID do documento Telegram é registado para auditoria, mas não define sozinho se duas faixas são duplicadas. Registos sem os três campos não são tratados como duplicados automaticamente.
+- A deduplicação segue a lógica do Spotygram: considera duplicados o mesmo documento Telegram ou faixas com título, intérprete, duração e tamanho do ficheiro iguais (título/intérprete normalizados). Registos sem metadados suficientes não são agrupados por metadados.
 - O protótipo regista mensagens Telegram e metadados mínimos. Não inspeciona nem descarrega o conteúdo dos ficheiros.
 - A deteção de duplicados de texto é apenas heurística. Não elimina mensagens nem versões automaticamente.
 - A versão atual encaminha cada mensagem à medida que chega; mensagens agrupadas podem não manter o agrupamento visual original.
