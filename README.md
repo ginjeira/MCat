@@ -12,6 +12,7 @@ Prova de conceito para observar o bot Telegram Music Downloader, catalogar as me
 - `/arm` recolhe em simulação; `/live` autoriza encaminhamento real depois de `Finished`.
 - `/music-check` e `/duplicates` consultam o destino e as fontes opcionais `TG_DEDUP_SOURCES` com o filtro oficial `InputMessagesFilterMusic`; os IDs de documento são unidos para deduplicação entre chats. `/music-audit`, `/music-search-audit` e `/music-detail-audit` continuam a auditar apenas o destino principal.
 - `/duplicates` audita todos os chats configurados para redundância e lista documentos de áudio repetidos e possíveis correspondências por título/intérprete, sem alterar nem apagar mensagens.
+- `/hist-music-find <termos>` pesquisa título e intérprete nos metadados de áudio de todos os chats configurados, ignorando maiúsculas/minúsculas e acentos; apresenta chat, mensagem e ID do documento. É só leitura.
 - Uma diferença entre o número anunciado e o observado é reportada, mas não bloqueia automaticamente o processamento.
 
 ## Estado da versão 0.1
@@ -82,6 +83,7 @@ Na primeira execução, o Telegram pede autenticação. A sessão local permite 
 - /disarm — desativa a recolha de novas playlists.
 - /music-check — atualiza os índices de música do destino e das fontes adicionais de redundância.
 - /duplicates — audita duplicados de áudio em todos os chats usados para redundância; só leitura.
+- /hist-music-find <termos> — pesquisa artista/título nos históricos configurados; só leitura.
 - /status — mostra contagens.
 - /export <ficheiro.csv> — exporta o inventário.
 - /help — ajuda.
