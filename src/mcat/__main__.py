@@ -159,7 +159,7 @@ def export_csv(path):
 
 
 async def main():
-    global current_query, current_label, forwarding_armed, bot_entity, destination_entity, dedup_entities
+    global current_query, current_label, forwarding_armed, auto_playlist_stage, auto_choice_number, auto_min_message_id, bot_entity, destination_entity, dedup_entities
     init_db()
     await client.start()
     bot_entity = await client.get_entity(BOT_USERNAME)
@@ -225,7 +225,7 @@ async def main():
                 target = str(auto_choice_number)
                 match = find_inline_button(
                     message,
-                    lambda label: label.strip().rstrip(".):") == target,
+                    lambda label: bool(re.fullmatch(r"\\D*" + re.escape(target) + r"\\D*", label.strip())),
                 )
                 if match:
                     row_index, column_index, label = match
