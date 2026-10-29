@@ -140,27 +140,35 @@ def audio_metadata(message):
     }
 
 
+def norm_metadata(value):
+    import unicodedata
+    value = unicodedata.normalize("NFKD", (value or "").casefold())
+    value = "".join(char for char in value if not unicodedata.combining(char))
+    return re.sub(r"[^a-z0-9]+", " ", value).strip()
+
+
 def duplicate_groups(records):
-    """Group audio records by exact Telegram document ID and by title/performer."""
+    """Group exact Telegram documents and tracks with identical title, performer and duration."""
     from collections import defaultdict
 
     exact = defaultdict(list)
     metadata = defaultdict(list)
     for record in records:
         exact[record["document_id"]].append(record)
-        title = " ".join((record.get("title") or "").casefold().split())
-        performer = " ".join((record.get("performer") or "").casefold().split())
-        if title:
-            metadata[(performer, title)].append(record)
+        title = norm_metadata(record.get("title"))
+        performer = norm_metadata(record.get("performer"))
+        duration = record.get("duration")
+        if title and performer and duration is not None:
+            metadata[(performer, title, duration)].append(record)
     exact_groups = [
         {"document_id": doc_id, "records": items}
         for doc_id, items in exact.items() if len(items) > 1
     ]
     metadata_groups = [
-        {"performer": key[0], "title": key[1], "records": items}
+        {"performer": key[0], "title": key[1], "duration": key[2], "records": items}
         for key, items in metadata.items()
         if len(items) > 1 and len({item["document_id"] for item in items}) > 1
     ]
     exact_groups.sort(key=lambda group: (-len(group["records"]), group["document_id"]))
-    metadata_groups.sort(key=lambda group: (-len(group["records"]), group["performer"], group["title"]))
+    metadata_groups.sort(key=lambda group: (-len(group["records"]), group["performer"], group["title"], group["duration"]))
     return exact_groups, metadata_groups
