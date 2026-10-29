@@ -98,3 +98,53 @@ def playlist_delivery_summary(db, playlist_id):
         "missing": counts.get("missing", 0),
         "errors": counts.get("error", 0),
     }
+
+
+def audio_metadata(message):
+    """Return lightweight Telegram audio metadata without downloading media."""
+    document = getattr(message, "document", None)
+    if document is None:
+        return None
+    attrs = getattr(document, "attributes", None) or []
+    audio_attr = next(
+        (attr for attr in attrs if attr.__class__.__name__ == "DocumentAttributeAudio"),
+        None,
+    )
+    mime_type = (getattr(document, "mime_type", None) or "").lower()
+    if audio_attr is None and not mime_type.startswith("audio/"):
+        return None
+    title = getattr(audio_attr, "title", None) if audio_attr else None
+    performer = getattr(audio_attr, "performer", None) if audio_attr else None
+    return {
+        "document_id": str(document.id),
+        "message_id": getattr(message, "id", None),
+        "title": (title or "").strip(),
+        "performer": (performer or "").strip(),
+        "mime_type": mime_type,
+    }
+
+
+def duplicate_groups(records):
+    """Group audio records by exact Telegram document ID and by title/performer."""
+    from collections import defaultdict
+
+    exact = defaultdict(list)
+    metadata = defaultdict(list)
+    for record in records:
+        exact[record["document_id"]].append(record)
+        title = " ".join((record.get("title") or "").casefold().split())
+        performer = " ".join((record.get("performer") or "").casefold().split())
+        if title:
+            metadata[(performer, title)].append(record)
+    exact_groups = [
+        {"document_id": doc_id, "records": items}
+        for doc_id, items in exact.items() if len(items) > 1
+    ]
+    metadata_groups = [
+        {"performer": key[0], "title": key[1], "records": items}
+        for key, items in metadata.items()
+        if len(items) > 1 and len({item["document_id"] for item in items}) > 1
+    ]
+    exact_groups.sort(key=lambda group: (-len(group["records"]), group["document_id"]))
+    metadata_groups.sort(key=lambda group: (-len(group["records"]), group["performer"], group["title"]))
+    return exact_groups, metadata_groups
