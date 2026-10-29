@@ -382,6 +382,45 @@ async def main():
             if only_iter:
                 print("  IDs de exemplo (iter_messages): " + ", ".join(str(mid) for mid in only_iter[:40]))
             print("[MUSIC-SEARCH-AUDIT] Auditoria apenas de leitura; nenhuma mensagem foi alterada.")
+        elif command == "/music-detail-audit":
+            if destination_entity is None:
+                print("Destino não resolvido; verifica TG_DESTINATION.")
+                continue
+            print("[MUSIC-DETAIL-AUDIT] A contar documentos e atributos; só leitura...")
+            rows = []
+            scanned = 0
+            audio_attr_docs = 0
+            audio_mime_docs = 0
+            grouped_messages = 0
+            attr_counts = {}
+            async for item in client.iter_messages(destination_entity, limit=None):
+                scanned += 1
+                doc = getattr(item, "document", None)
+                if doc is None:
+                    continue
+                attrs = list(getattr(doc, "attributes", None) or [])
+                names = [a.__class__.__name__ for a in attrs]
+                for name in names:
+                    attr_counts[name] = attr_counts.get(name, 0) + 1
+                audio_attrs = [a for a in attrs if a.__class__.__name__ == "DocumentAttributeAudio" or hasattr(a, "title") or hasattr(a, "performer")]
+                mime = (getattr(doc, "mime_type", None) or "").lower()
+                audio_attr_docs += int(bool(audio_attrs))
+                audio_mime_docs += int(mime.startswith("audio/"))
+                grouped_messages += int(bool(getattr(item, "grouped_id", None)))
+                first = audio_attrs[0] if audio_attrs else None
+                rows.append({"message_id": item.id, "document_id": str(doc.id), "grouped_id": str(getattr(item, "grouped_id", "") or ""), "mime_type": mime, "audio_attribute_count": len(audio_attrs), "audio_attribute_classes": "|".join(a.__class__.__name__ for a in audio_attrs), "all_attribute_classes": "|".join(names), "title": (getattr(first, "title", None) or "") if first else "", "performer": (getattr(first, "performer", None) or "") if first else "", "duration": getattr(first, "duration", "") if first else ""})
+            path = Path("music-detail-audit.csv")
+            fields = ["message_id", "document_id", "grouped_id", "mime_type", "audio_attribute_count", "audio_attribute_classes", "all_attribute_classes", "title", "performer", "duration"]
+            with path.open("w", newline="", encoding="utf-8-sig") as handle:
+                writer = csv.DictWriter(handle, fieldnames=fields)
+                writer.writeheader()
+                writer.writerows(rows)
+            print(f"[MUSIC-DETAIL-AUDIT] Mensagens analisadas={scanned}; mensagens com documento={len(rows)}.")
+            print(f"[MUSIC-DETAIL-AUDIT] Documentos com atributo de áudio={audio_attr_docs}; MIME audio/*={audio_mime_docs}.")
+            print(f"[MUSIC-DETAIL-AUDIT] Mensagens com grouped_id={grouped_messages}.")
+            print("[MUSIC-DETAIL-AUDIT] Classes de atributos: " + (", ".join(f"{k}={v}" for k, v in sorted(attr_counts.items())) or "(nenhuma)"))
+            print(f"[MUSIC-DETAIL-AUDIT] Inventário detalhado: {path.resolve()}")
+            print("[MUSIC-DETAIL-AUDIT] Nenhuma mensagem foi alterada.")
         elif command == "/duplicates":
             if destination_entity is None:
                 print("Destino não resolvido; verifica TG_DESTINATION.")
