@@ -261,7 +261,8 @@ async def main():
                     row_index, column_index, label = unchecked
                     button_object = message.buttons[row_index][column_index]
                     raw_button = getattr(button_object, "button", button_object)
-                    button_type = getattr(raw_button, "type", None)\n                    callback_data = getattr(button_type, "data", None)
+                    button_type = getattr(raw_button, "type", None)
+                    callback_data = getattr(button_type, "data", None)
                     auto_playlist_stage = "wait_choice"
                     print(
                         f"\\n[AUTO-BUTTON] classe={type(button_object).__name__}; "
