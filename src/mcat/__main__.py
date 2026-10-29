@@ -12,6 +12,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
+from telethon.tl.functions.messages import SearchRequest
 from telethon.tl.types import InputMessagesFilterMusic
 
 load_dotenv()
@@ -265,7 +266,7 @@ async def main():
             forwarding_armed = False
             break
         if command == "/help":
-            print("/search <termo>   envia uma pesquisa ao bot\n/tag <etiqueta>   etiqueta as mensagens seguintes\n/arm             recolhe playlist em simulação\n/live            autoriza encaminhamento real\n/disarm           desativa recolha\n/music-check      indexa histórico de música de GinjMusic\n/music-audit      compara filtro Music com histórico completo\n/duplicates       audita duplicados de áudio (só leitura)\n/status           estatísticas\n/export <ficheiro.csv> exportação CSV\n/help             ajuda\n/quit             sair")
+            print("/search <termo>   envia uma pesquisa ao bot\n/tag <etiqueta>   etiqueta as mensagens seguintes\n/arm             recolhe playlist em simulação\n/live            autoriza encaminhamento real\n/disarm           desativa recolha\n/music-check      indexa histórico de música de GinjMusic\n/music-audit      compara filtro Music com histórico completo\n/music-search-audit compara paginação SearchRequest com iter_messages\n/duplicates       audita duplicados de áudio (só leitura)\n/status           estatísticas\n/export <ficheiro.csv> exportação CSV\n/help             ajuda\n/quit             sair")
         elif command == "/search":
             if not args:
                 print("Uso: /search <termo>")
@@ -327,6 +328,60 @@ async def main():
             if filter_not_detected_as_audio:
                 print("  IDs de exemplo: " + ", ".join(str(mid) for mid in filter_not_detected_as_audio[:30]))
             print("[MUSIC-AUDIT] Auditoria apenas de leitura; nenhuma mensagem foi alterada.")
+        elif command == "/music-search-audit":
+            if destination_entity is None:
+                print("Destino não resolvido; verifica TG_DESTINATION.")
+                continue
+            print("[MUSIC-SEARCH-AUDIT] A comparar iter_messages com SearchRequest; só leitura, sem downloads...")
+            iter_ids = set()
+            async for item in client.iter_messages(destination_entity, limit=None, filter=InputMessagesFilterMusic):
+                iter_ids.add(item.id)
+            search_ids = set()
+            offset_id = 0
+            page_number = 0
+            page_size = 100
+            while True:
+                page_number += 1
+                result = await client(SearchRequest(
+                    peer=destination_entity,
+                    q="",
+                    filter=InputMessagesFilterMusic(),
+                    min_date=None,
+                    max_date=None,
+                    offset_id=offset_id,
+                    add_offset=0,
+                    limit=page_size,
+                    max_id=0,
+                    min_id=0,
+                    hash=0,
+                ))
+                messages = [item for item in result.messages if getattr(item, "id", None)]
+                page_ids = {item.id for item in messages}
+                new_ids = page_ids - search_ids
+                print(f"[MUSIC-SEARCH-AUDIT] Página={page_number}; mensagens recebidas={len(messages)}; novos IDs={len(new_ids)}.")
+                if not messages or not new_ids:
+                    break
+                search_ids.update(page_ids)
+                next_offset = min(page_ids)
+                if next_offset == offset_id:
+                    print("[MUSIC-SEARCH-AUDIT] Paragem de segurança: offset não avançou.")
+                    break
+                offset_id = next_offset
+                if len(messages) < page_size:
+                    break
+            only_search = sorted(search_ids - iter_ids, reverse=True)
+            only_iter = sorted(iter_ids - search_ids, reverse=True)
+            overlap = len(search_ids & iter_ids)
+            print(f"[MUSIC-SEARCH-AUDIT] Total iter_messages(filter=Music)={len(iter_ids)} IDs únicos.")
+            print(f"[MUSIC-SEARCH-AUDIT] Total SearchRequest(filter=Music)={len(search_ids)} IDs únicos em {page_number} páginas.")
+            print(f"[MUSIC-SEARCH-AUDIT] IDs comuns={overlap}.")
+            print(f"[MUSIC-SEARCH-AUDIT] Apenas SearchRequest={len(only_search)}.")
+            if only_search:
+                print("  IDs de exemplo (SearchRequest): " + ", ".join(str(mid) for mid in only_search[:40]))
+            print(f"[MUSIC-SEARCH-AUDIT] Apenas iter_messages={len(only_iter)}.")
+            if only_iter:
+                print("  IDs de exemplo (iter_messages): " + ", ".join(str(mid) for mid in only_iter[:40]))
+            print("[MUSIC-SEARCH-AUDIT] Auditoria apenas de leitura; nenhuma mensagem foi alterada.")
         elif command == "/duplicates":
             if destination_entity is None:
                 print("Destino não resolvido; verifica TG_DESTINATION.")
