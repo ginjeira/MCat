@@ -10,7 +10,7 @@ Prova de conceito para observar o bot Telegram Music Downloader, catalogar as me
 - Persiste playlists e mensagens multimédia em SQLite e valida contagem.
 - Indexa o histórico de GinjMusic para deduplicar pelo ID do documento Telegram.
 - `/arm` recolhe em simulação; `/live` autoriza encaminhamento real depois de `Finished`.
-- `/music-check` e `/duplicates` consultam o histórico do destino com o filtro oficial `InputMessagesFilterMusic`, usado pela API para procurar mensagens de música. O resultado deve ser comparado com a vista Music do cliente Telegram.
+- `/music-check` e `/duplicates` consultam o histórico do destino com o filtro oficial `InputMessagesFilterMusic`, usado pela API para procurar mensagens de música. `/music-audit` compara esse filtro com o histórico completo e identifica mensagens com atributos de áudio que ficaram fora do filtro.
 - `/duplicates` audita o histórico do destino e lista documentos de áudio repetidos e possíveis correspondências por título/intérprete, sem alterar nem apagar mensagens.
 - Uma diferença entre o número anunciado e o observado é reportada, mas não bloqueia automaticamente o processamento.
 
