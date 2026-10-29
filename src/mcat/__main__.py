@@ -526,8 +526,8 @@ async def main():
                 metadata_keys = {}
                 for doc_id, copies in by_document.items():
                     first = copies[0]
-                    key = (norm(first.get("performer", "")), norm(first.get("title", "")))
-                    if key != ("", ""):
+                    key = (norm(first.get("performer", "")), norm(first.get("title", "")), first.get("duration"))
+                    if key[0] and key[1] and key[2] is not None:
                         metadata_keys.setdefault(key, []).append((doc_id, copies))
                 print(f"[HIST-MUSIC-FIND] Mensagens correspondentes={len(records)}; documentos distintos={len(by_document)}.")
                 print("[HIST-MUSIC-FIND] Resultados (título — intérprete; chat:mensagem):")
@@ -546,7 +546,7 @@ async def main():
                     print(f"  ... mais {len(by_document) - 40} documentos não apresentados.")
                 multi_file = [items for items in metadata_keys.values() if len(items) > 1]
                 if multi_file:
-                    print(f"[HIST-MUSIC-FIND] Atenção: {sum(len(items) for items in multi_file)} documentos agrupados em {len(multi_file)} conjuntos com o mesmo título/intérprete mas IDs de ficheiro diferentes.")
+                    print(f"[HIST-MUSIC-FIND] Atenção: {sum(len(items) for items in multi_file)} documentos agrupados em {len(multi_file)} conjuntos com título, intérprete e duração iguais, mas IDs de ficheiro diferentes.")
             print("[HIST-MUSIC-FIND] Pesquisa apenas de leitura; nenhuma mensagem foi alterada, enviada ou apagada.")
         elif command == "/duplicates":
             if destination_entity is None:
@@ -580,7 +580,7 @@ async def main():
             for group in metadata_groups[:25]:
                 label = " — ".join(part for part in (group["performer"], group["title"]) if part) or "(sem título)"
                 ids = ", ".join(f'{item.get("chat_id", destination_entity.id)}:{item["message_id"]}' for item in group["records"])
-                print(f"  [POSSÍVEL DUPLICADO] {label}; mensagens={ids}; ficheiros distintos={len({item['document_id'] for item in group['records']})}")
+                print(f"  [POSSÍVEL DUPLICADO] {label}; duração={group['duration']}s; mensagens={ids}; ficheiros distintos={len({item['document_id'] for item in group['records']})}")
             if len(metadata_groups) > 25:
                 print(f"  ... mais {len(metadata_groups) - 25} grupos por metadados não apresentados.")
             if not exact_groups and not metadata_groups:
