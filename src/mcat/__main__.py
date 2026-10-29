@@ -97,7 +97,7 @@ async def click_inline_button(message, row_index, column_index):
         await asyncio.sleep(0.75)
         refreshed = await client.get_messages(bot_entity, ids=message.id)
         refreshed_text = (refreshed.message or "") if refreshed else ""
-        if re.search(r"\\bin\\s+['\\\"]?playlist['\\\"]?", refreshed_text, re.I):
+        if re.search(r"\bin\s+['\"]?playlist['\"]?", refreshed_text, re.I):
             return None
 
     # The message is still in track mode. Retry the same callback once only.
