@@ -345,12 +345,20 @@ async def main():
                         print(f"\n[AUTO-CLICK] Falha ao clicar em {label!r}: {type(exc).__name__}: {exc}")
                         return
 
-                    await asyncio.sleep(0.5)
-                    refreshed = await client.get_messages(bot_entity, ids=message.id)
-                    refreshed_text = (refreshed.message or "") if refreshed else ""
-                    refreshed_is_playlist = bool(
-                        re.search(r"\bin\s+['\"]?playlist['\"]?", refreshed_text, re.I)
-                    )
+                    refreshed = None
+                    refreshed_text = ""
+                    refreshed_is_playlist = False
+                    # Poll the edited message: callback success can arrive before
+                    # Telegram exposes the updated keyboard to get_messages().
+                    for _ in range(8):
+                        await asyncio.sleep(0.5)
+                        refreshed = await client.get_messages(bot_entity, ids=message.id)
+                        refreshed_text = (refreshed.message or "") if refreshed else ""
+                        refreshed_is_playlist = bool(
+                            re.search(r"\bin\s+['\"]?playlist['\"]?", refreshed_text, re.I)
+                        )
+                        if refreshed_is_playlist:
+                            break
                     print(
                         f"\n[AUTO-VERIFY] mensagem={message.id}; "
                         f"modo_playlist={refreshed_is_playlist}; texto={refreshed_text[:180]!r}"
