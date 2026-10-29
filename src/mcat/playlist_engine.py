@@ -107,7 +107,7 @@ def audio_metadata(message):
         return None
     attrs = getattr(document, "attributes", None) or []
     audio_attr = next(
-        (attr for attr in attrs if attr.__class__.__name__ == "DocumentAttributeAudio"),
+        (attr for attr in attrs if attr.__class__.__name__ == "DocumentAttributeAudio" or hasattr(attr, "title") or hasattr(attr, "performer")),
         None,
     )
     mime_type = (getattr(document, "mime_type", None) or "").lower()
