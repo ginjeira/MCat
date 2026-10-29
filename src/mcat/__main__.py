@@ -214,26 +214,33 @@ async def main():
                 items=db.execute("SELECT * FROM playlist_items WHERE playlist_id=? ORDER BY position",(active["id"],)).fetchall()
                 # Snapshot do destino antes de processar esta playlist, para que
                 # um envio durante o ciclo não passe a contar como preexistente.
-                existing_ids = {
-                    row["document_id"] for row in db.execute(
-                        "SELECT DISTINCT document_id FROM destination_media WHERE destination_chat_id IN (" + ",".join("?" for _ in dedup_entities) + ")",
+                existing_keys = {
+                    (norm(row["title"]), norm(row["performer"]), row["duration"])
+                    for row in db.execute(
+                        "SELECT DISTINCT title, performer, duration FROM destination_media WHERE destination_chat_id IN (" + ",".join("?" for _ in dedup_entities) + ")",
                         tuple(entity.id for entity in dedup_entities),
                     ).fetchall()
+                    if row["title"] and row["performer"] and row["duration"] is not None
                 }
-                seen_playlist_ids = set()
+                seen_playlist_keys = set()
                 for item in items:
                     doc_id = item["document_id"]
-                    if doc_id and doc_id in existing_ids:
+                    title = item["title"] or ""
+                    performer = item["performer"] or ""
+                    duration = item["duration"]
+                    track_key = (norm(title), norm(performer), duration)
+                    has_track_key = bool(track_key[0] and track_key[1] and duration is not None)
+                    if has_track_key and track_key in existing_keys:
                         db.execute("UPDATE playlist_items SET status='duplicate' WHERE playlist_id=? AND source_message_id=?",(active["id"],item["source_message_id"]))
-                    elif doc_id and doc_id in seen_playlist_ids:
+                    elif has_track_key and track_key in seen_playlist_keys:
                         db.execute("UPDATE playlist_items SET status='duplicate_in_playlist' WHERE playlist_id=? AND source_message_id=?",(active["id"],item["source_message_id"]))
                     elif dry_run:
-                        if doc_id:
-                            seen_playlist_ids.add(doc_id)
+                        if has_track_key:
+                            seen_playlist_keys.add(track_key)
                         db.execute("UPDATE playlist_items SET status='dry_run' WHERE playlist_id=? AND source_message_id=?",(active["id"],item["source_message_id"]))
                     else:
-                        if doc_id:
-                            seen_playlist_ids.add(doc_id)
+                        if has_track_key:
+                            seen_playlist_keys.add(track_key)
                         try:
                             source=await client.get_messages(bot_entity,ids=item["source_message_id"])
                             if not source or not source.media:
@@ -244,7 +251,10 @@ async def main():
                                 db.execute("UPDATE playlist_items SET status='forwarded',forwarded_message_id=? WHERE playlist_id=? AND source_message_id=?",(getattr(sent,"id",None),active["id"],item["source_message_id"]))
                                 save_observation(source, forwarded=True, dest_id=destination_entity.id, dest_message_ids=str(getattr(sent,"id","")))
                                 if item["document_id"] and sent:
-                                    db.execute("INSERT OR IGNORE INTO destination_media VALUES(?,?,?,?)",(destination_entity.id,item["document_id"],sent.id,now_iso()))
+                                    db.execute("""INSERT OR REPLACE INTO destination_media
+                                        (destination_chat_id,document_id,destination_message_id,seen_at,title,performer,duration)
+                                        VALUES(?,?,?,?,?,?,?)""",
+                                        (destination_entity.id,item["document_id"],sent.id,now_iso(),title,performer,duration))
                         except Exception as exc:
                             db.execute("UPDATE playlist_items SET status='error',error=? WHERE playlist_id=? AND source_message_id=?",(str(exc)[:500],active["id"],item["source_message_id"]))
                     db.commit()
@@ -266,7 +276,7 @@ async def main():
             return
         active=active_playlist(db,message.chat_id)
         if active and message.media:
-            add_media(db,active["id"],message.chat_id,message.id,media_document_id(message))
+            add_media(db,active["id"],message.chat_id,message.id,media_document_id(message),audio_metadata(message))
         save_observation(message)
         print("> ", end="", flush=True)
 
