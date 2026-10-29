@@ -242,11 +242,39 @@ async def main():
                     row_index, column_index, label = unchecked
                     auto_playlist_stage = "wait_choice"
                     try:
-                        await message.click(i=row_index, j=column_index)
-                        print(f"\n[AUTO-CLICK] Filtro {label!r} selecionado; à espera dos resultados de playlists.")
+                        callback_result = await message.click(i=row_index, j=column_index)
+                        print(
+                            f"\n[AUTO-CLICK] Pedido de clique enviado para {label!r}; "
+                            f"resposta={type(callback_result).__name__}; "
+                            f"mensagem_resposta={getattr(callback_result, 'message', None)!r}; "
+                            f"alerta={getattr(callback_result, 'alert', None)!r}; "
+                            f"url={getattr(callback_result, 'url', None)!r}"
+                        )
+                        # Give the bot a moment to edit its results, then inspect
+                        # the same Telegram message independently of event delivery.
+                        await asyncio.sleep(1.0)
+                        refreshed = await client.get_messages(bot_entity, ids=message.id)
+                        if refreshed:
+                            refreshed_text = refreshed.message or ""
+                            refreshed_buttons = [
+                                (getattr(button, "text", "") or "").strip()
+                                for row in (getattr(refreshed, "buttons", None) or [])
+                                for button in row
+                            ]
+                            refreshed_is_playlist = bool(
+                                re.search(r"\\bin\\s+['\\"]?playlist['\\"]?", refreshed_text, re.I)
+                            )
+                            print(
+                                f"\\n[AUTO-VERIFY] mensagem={refreshed.id}; "
+                                f"modo_playlist={refreshed_is_playlist}; "
+                                f"texto={refreshed_text[:180]!r}; "
+                                f"botão_playlists={[b for b in refreshed_buttons if 'playlist' in norm(b)]!r}"
+                            )
+                        else:
+                            print(f"\\n[AUTO-VERIFY] Não foi possível reler a mensagem {message.id} após o clique.")
                     except Exception as exc:
                         auto_playlist_stage = None
-                        print(f"\n[AUTO-CLICK] Falha ao selecionar filtro {label!r}: {type(exc).__name__}: {exc}")
+                        print(f"\\n[AUTO-CLICK] Falha ao clicar/verificar {label!r}: {type(exc).__name__}: {exc}")
                 else:
                     print("[AUTO-TRACE] Sem clique: a mensagem não é uma lista de faixas com o filtro Playlists desmarcado.")
             elif auto_playlist_stage == "wait_choice":
