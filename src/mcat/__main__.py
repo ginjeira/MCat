@@ -189,12 +189,28 @@ async def main():
                     index_destination_media(db, destination_entity.id, [m async for m in client.iter_messages(destination_entity, limit=None)])
                     destination_indexed = True
                 items=db.execute("SELECT * FROM playlist_items WHERE playlist_id=? ORDER BY position",(active["id"],)).fetchall()
+                # Snapshot do destino antes de processar esta playlist, para que
+                # um envio durante o ciclo não passe a contar como preexistente.
+                existing_ids = {
+                    row["document_id"] for row in db.execute(
+                        "SELECT DISTINCT document_id FROM destination_media WHERE destination_chat_id=?",
+                        (destination_entity.id,),
+                    ).fetchall()
+                }
+                seen_playlist_ids = set()
                 for item in items:
-                    if destination_has_media(db,destination_entity.id,item["document_id"]):
+                    doc_id = item["document_id"]
+                    if doc_id and doc_id in existing_ids:
                         db.execute("UPDATE playlist_items SET status='duplicate' WHERE playlist_id=? AND source_message_id=?",(active["id"],item["source_message_id"]))
+                    elif doc_id and doc_id in seen_playlist_ids:
+                        db.execute("UPDATE playlist_items SET status='duplicate_in_playlist' WHERE playlist_id=? AND source_message_id=?",(active["id"],item["source_message_id"]))
                     elif dry_run:
+                        if doc_id:
+                            seen_playlist_ids.add(doc_id)
                         db.execute("UPDATE playlist_items SET status='dry_run' WHERE playlist_id=? AND source_message_id=?",(active["id"],item["source_message_id"]))
                     else:
+                        if doc_id:
+                            seen_playlist_ids.add(doc_id)
                         try:
                             source=await client.get_messages(bot_entity,ids=item["source_message_id"])
                             if not source or not source.media:
