@@ -75,3 +75,25 @@ def index_destination_media(db, chat_id, messages):
 
 def destination_has_media(db, chat_id, doc):
     return bool(doc and db.execute("SELECT 1 FROM destination_media WHERE destination_chat_id=? AND document_id=? LIMIT 1",(chat_id,doc)).fetchone())
+
+def playlist_delivery_summary(db, playlist_id):
+    """Summarize deduplication and delivery outcomes for a completed playlist."""
+    rows = db.execute(
+        "SELECT status, COUNT(*) AS n FROM playlist_items WHERE playlist_id=? GROUP BY status",
+        (playlist_id,),
+    ).fetchall()
+    counts = {row["status"]: row["n"] for row in rows}
+    duplicate = counts.get("duplicate", 0)
+    forwarded = counts.get("forwarded", 0)
+    # Every processed non-duplicate item was absent from the destination index
+    # when the playlist was evaluated. This includes failures/missing source
+    # messages, which remain visible in the separate outcome status counts.
+    new = sum(n for status, n in counts.items() if status != "duplicate")
+    return {
+        "existing": duplicate,
+        "new": new,
+        "forwarded": forwarded,
+        "dry_run": counts.get("dry_run", 0),
+        "missing": counts.get("missing", 0),
+        "errors": counts.get("error", 0),
+    }
