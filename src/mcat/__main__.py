@@ -278,8 +278,15 @@ async def main():
         try:
             parts = shlex.split(raw)
         except ValueError as exc:
-            print(f"Comando inválido: {exc}")
-            continue
+            # Apostrophes are common in song titles (e.g. O' Mine), and should
+            # not make a plain, unquoted search fail as an unmatched shell quote.
+            command_text, separator, remainder = raw.strip().partition(" ")
+            if separator and command_text.startswith("/"):
+                parts = [command_text, remainder.strip()]
+                print(f"[AVISO] Aspas não equilibradas; a interpretar os termos restantes literalmente ({exc}).")
+            else:
+                print(f"Comando inválido: {exc}")
+                continue
         if not parts:
             continue
         command, args = parts[0].lower(), parts[1:]
