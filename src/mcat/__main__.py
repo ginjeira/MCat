@@ -227,6 +227,8 @@ async def main():
 
     dry_run = True
     destination_indexed = False
+    live_test_limit = None
+    live_test_armed = False
 
     async def select_playlist_choice(message):
         """Select the requested playlist only after the filter callback has completed."""
@@ -420,6 +422,7 @@ async def main():
                 }
                 seen_doc_ids = set()
                 seen_playlist_keys = set()
+                live_forwarded_count = 0
                 for item in items:
                     doc_id = item["document_id"]
                     title = item["title"] or ""
@@ -438,6 +441,12 @@ async def main():
                         if has_track_key:
                             seen_playlist_keys.add(track_key)
                         db.execute("UPDATE playlist_items SET status='dry_run' WHERE playlist_id=? AND source_message_id=?",(active["id"],item["source_message_id"]))
+                    elif live_test_limit is not None and live_forwarded_count >= live_test_limit:
+                        if doc_id:
+                            seen_doc_ids.add(doc_id)
+                        if has_track_key:
+                            seen_playlist_keys.add(track_key)
+                        db.execute("UPDATE playlist_items SET status='limit_reached' WHERE playlist_id=? AND source_message_id=?",(active["id"],item["source_message_id"]))
                     else:
                         if doc_id:
                             seen_doc_ids.add(doc_id)
@@ -451,6 +460,8 @@ async def main():
                                 sent=await client.forward_messages(destination_entity,source)
                                 sent=sent[0] if isinstance(sent,list) else sent
                                 db.execute("UPDATE playlist_items SET status='forwarded',forwarded_message_id=? WHERE playlist_id=? AND source_message_id=?",(getattr(sent,"id",None),active["id"],item["source_message_id"]))
+                                if sent:
+                                    live_forwarded_count += 1
                                 save_observation(source, forwarded=True, dest_id=destination_entity.id, dest_message_ids=str(getattr(sent,"id","")))
                                 if item["document_id"] and sent:
                                     db.execute("""INSERT OR REPLACE INTO destination_media
@@ -469,10 +480,13 @@ async def main():
             print(
                 f"[RESULTADO] Encaminhadas={delivery['forwarded']}; "
                 f"simulação={delivery['dry_run']}; "
+                f"limite de teste atingido={delivery['limit_reached']}; "
                 f"mensagens em falta={delivery['missing']}; erros={delivery['errors']}."
             )
             print("[PLAYLIST] Concluída em modo simulação." if dry_run else "[PLAYLIST] Processamento real terminado.")
             dry_run = True  # autorização real aplica-se apenas a uma playlist
+            live_test_limit = None
+            live_test_armed = False
             save_observation(message)
             print("> ", end="", flush=True)
             return
@@ -507,6 +521,7 @@ async def main():
             break
         if command == "/help":
             print("""/search <termo> [n] pesquisa e seleciona automaticamente Playlist e a opção n (por omissão 1)
+/live-test <limite> arma uma única pesquisa em modo real, limitada a esse número de músicas novas encaminhadas
 /hist-music-find <termo> pesquisa título/intérprete nos históricos (só leitura)
 /hist-music-find <termo> pesquisa título/intérprete nos históricos (só leitura)
 /tag <etiqueta>   etiqueta as mensagens seguintes
@@ -543,13 +558,28 @@ async def main():
             auto_min_message_id = latest_bot_messages[0].id if latest_bot_messages else 0
             auto_playlist_stage = "wait_playlist"
             forwarding_armed = True
-            dry_run = True
+            if live_test_armed:
+                dry_run = False
+                print(f"[LIVE-TEST] Modo real armado para esta pesquisa; máximo de {live_test_limit} músicas novas encaminhadas.")
+            else:
+                dry_run = True
             sent_query = await client.send_message(bot_entity, current_query)
             auto_min_message_id = sent_query.id
             print(
                 f"Pesquisa enviada. MCat vai clicar automaticamente em 'Playlist' e na opção "
-                f"{auto_choice_number}; recolha ativa em modo simulação."
+                f"{auto_choice_number}; recolha ativa em modo {'real limitado' if live_test_armed else 'simulação'}."
             )
+            live_test_armed = False
+        elif command == "/live-test":
+            if len(args) != 1 or not args[0].isdigit() or int(args[0]) < 1:
+                print("Uso: /live-test <limite>; exemplo: /live-test 3. Depois executa /search <termo> [n].")
+                continue
+            if destination_entity is None:
+                print("Destino não resolvido; verifica TG_DESTINATION.")
+                continue
+            live_test_limit = int(args[0])
+            live_test_armed = True
+            print(f"[LIVE-TEST] Próxima pesquisa autorizada em modo real, com limite de {live_test_limit} músicas novas encaminhadas. Executa /search <termo> [n].")
         elif command == "/tag":
             current_label = "-".join(norm(" ".join(args)).split()) if args else "sem-etiqueta"
             print(f"Etiqueta atual: {current_label}")
