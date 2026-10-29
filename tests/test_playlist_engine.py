@@ -35,7 +35,7 @@ class PlaylistEngineTests(unittest.TestCase):
         self.db.execute("UPDATE playlist_items SET status='dry_run' WHERE playlist_id=? AND source_message_id IN (12,13)",(pid,))
         self.db.commit()
         result=playlist_delivery_summary(self.db,pid)
-        self.assertEqual(result,{"existing":1,"new":2,"forwarded":0,"dry_run":2,"missing":0,"errors":0})
+        self.assertEqual(result,{"existing":1,"playlist_duplicates":0,"new":2,"forwarded":0,"dry_run":2,"missing":0,"errors":0})
 
     def test_dedup(self):
         self.db.execute("INSERT INTO destination_media VALUES(?,?,?,?)",(456,"doc-a",88,"now"))
