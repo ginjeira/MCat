@@ -45,8 +45,6 @@ class PlaylistEngineTests(unittest.TestCase):
         self.assertTrue(destination_has_media(self.db,456,"doc-a"))
         self.assertFalse(destination_has_media(self.db,456,"doc-b"))
 
-if __name__=="__main__":
-    unittest.main()
 
 
 class FakeAudioAttribute:
@@ -91,6 +89,7 @@ class DuplicateAuditTests(unittest.TestCase):
         self.assertEqual(len(metadata), 1)
         self.assertEqual(metadata[0]["title"], "song")
         self.assertEqual(len(metadata[0]["records"]), 3)
+
 
 if __name__ == "__main__":
     unittest.main()
