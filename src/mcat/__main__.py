@@ -219,7 +219,9 @@ async def main():
             if auto_playlist_stage == "wait_playlist":
                 match = find_inline_button(
                     message,
-                    lambda label: norm(label) == "playlist",
+                    # The bot labels the category button "☑️ Playlists"
+                    # (plural, with a state emoji), not simply "Playlist".
+                    lambda label: norm(label) in {"playlist", "playlists"},
                 )
                 if match:
                     row_index, column_index, label = match
