@@ -210,10 +210,12 @@ async def main():
                 for row in (getattr(message, "buttons", None) or [])
                 for button in row
             ]
+            normalized_labels = [norm(label) for label in button_labels]
             print(
                 f"\\n[AUTO-DEBUG] Evento={type(event).__name__}; mensagem={message.id}; "
                 f"limite={auto_min_message_id}; etapa={auto_playlist_stage}; "
-                f"texto={text[:160]!r}; botões={button_labels!r}"
+                f"texto={text[:160]!r}; botões={button_labels!r}; "
+                f"normalizados={normalized_labels!r}"
             )
         if auto_playlist_stage and message.id > auto_min_message_id:
             if auto_playlist_stage == "wait_playlist":
