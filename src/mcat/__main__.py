@@ -275,16 +275,26 @@ async def main():
                         f"module={type(raw_button).__module__}"
                     )
                     try:
-                        callback_result = await click_inline_button(message, row_index, column_index)
-                        print(
-                            f"\n[AUTO-CLICK] Pedido de clique enviado para {label!r}; "
-                            f"resposta={type(callback_result).__name__}; "
-                            f"mensagem_resposta={getattr(callback_result, 'message', None)!r}; "
-                            f"alerta={getattr(callback_result, 'alert', None)!r}; "
-                            f"url={getattr(callback_result, 'url', None)!r}"
-                        )
-                        # Give the bot a moment to edit its results, then inspect
-                        # the same Telegram message independently of event delivery.
+                        try:
+                            callback_result = await click_inline_button(message, row_index, column_index)
+                            print(
+                                f"\\n[AUTO-CLICK] Pedido de clique enviado para {label!r}; "
+                                f"resposta={type(callback_result).__name__}; "
+                                f"mensagem_resposta={getattr(callback_result, 'message', None)!r}; "
+                                f"alerta={getattr(callback_result, 'alert', None)!r}; "
+                                f"url={getattr(callback_result, 'url', None)!r}"
+                            )
+                        except Exception as callback_exc:
+                            # A bot may process the click but fail to answer the callback query.
+                            # In that case Telegram raises a timeout despite the message update.
+                            if type(callback_exc).__name__ != "BotResponseTimeoutError":
+                                raise
+                            callback_result = None
+                            print(
+                                f"\\n[AUTO-CLICK] Sem confirmação do callback "
+                                f"({type(callback_exc).__name__}); a verificar a mensagem."
+                            )
+                        # Verify the resulting state even when Telegram reports a callback timeout.
                         await asyncio.sleep(1.0)
                         refreshed = await client.get_messages(bot_entity, ids=message.id)
                         if refreshed:
@@ -295,16 +305,20 @@ async def main():
                                 for button in row
                             ]
                             refreshed_is_playlist = bool(
-                                re.search(r"\bin\s+['\"]?playlist['\"]?", refreshed_text, re.I)
+                                re.search(r"\\bin\\s+['\\\"]?playlist['\\\"]?", refreshed_text, re.I)
                             )
                             print(
-                                f"\n[AUTO-VERIFY] mensagem={refreshed.id}; "
+                                f"\\n[AUTO-VERIFY] mensagem={refreshed.id}; "
                                 f"modo_playlist={refreshed_is_playlist}; "
                                 f"texto={refreshed_text[:180]!r}; "
                                 f"botão_playlists={[b for b in refreshed_buttons if 'playlist' in norm(b)]!r}"
                             )
+                            if not refreshed_is_playlist:
+                                auto_playlist_stage = None
+                                print("[AUTO-VERIFY] O filtro não mudou para playlists; automatização interrompida sem selecionar nenhuma opção.")
                         else:
-                            print(f"\\n[AUTO-VERIFY] Não foi possível reler a mensagem {message.id} após o clique.")
+                            auto_playlist_stage = None
+                            print(f"\\n[AUTO-VERIFY] Não foi possível reler a mensagem {message.id}; automatização interrompida.")
                     except Exception as exc:
                         auto_playlist_stage = None
                         print(f"\\n[AUTO-CLICK] Falha ao clicar/verificar {label!r}: {type(exc).__name__}: {exc}")
