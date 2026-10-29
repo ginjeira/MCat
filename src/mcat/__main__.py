@@ -6,7 +6,7 @@ import shlex
 import sqlite3
 import unicodedata
 
-from .playlist_engine import add_media, active_playlist, destination_has_media, finish_playlist, index_destination_media, init_playlist_schema, is_finished, is_playlist_start, media_document_id, start_playlist
+from .playlist_engine import add_media, active_playlist, destination_has_media, finish_playlist, index_destination_media, init_playlist_schema, is_finished, is_playlist_start, media_document_id, playlist_delivery_summary, start_playlist
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -203,12 +203,22 @@ async def main():
                                 sent=await client.forward_messages(destination_entity,source)
                                 sent=sent[0] if isinstance(sent,list) else sent
                                 db.execute("UPDATE playlist_items SET status='forwarded',forwarded_message_id=? WHERE playlist_id=? AND source_message_id=?",(getattr(sent,"id",None),active["id"],item["source_message_id"]))
-                                save_observation(source_message, forwarded=True, dest_id=destination_entity.id, dest_message_ids=str(getattr(sent,"id","")))
+                                save_observation(source, forwarded=True, dest_id=destination_entity.id, dest_message_ids=str(getattr(sent,"id","")))
                                 if item["document_id"] and sent:
                                     db.execute("INSERT OR IGNORE INTO destination_media VALUES(?,?,?,?)",(destination_entity.id,item["document_id"],sent.id,now_iso()))
                         except Exception as exc:
                             db.execute("UPDATE playlist_items SET status='error',error=? WHERE playlist_id=? AND source_message_id=?",(str(exc)[:500],active["id"],item["source_message_id"]))
                     db.commit()
+            delivery = playlist_delivery_summary(db, active["id"])
+            print(
+                f"[DEDUP] Já existentes em GinjMusic={delivery['existing']}; "
+                f"novas (não existentes antes do processamento)={delivery['new']}."
+            )
+            print(
+                f"[RESULTADO] Encaminhadas={delivery['forwarded']}; "
+                f"simulação={delivery['dry_run']}; "
+                f"mensagens em falta={delivery['missing']}; erros={delivery['errors']}."
+            )
             print("[PLAYLIST] Concluída em modo simulação." if dry_run else "[PLAYLIST] Processamento real terminado.")
             dry_run = True  # autorização real aplica-se apenas a uma playlist
             save_observation(message)
