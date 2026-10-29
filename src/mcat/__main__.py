@@ -204,6 +204,17 @@ async def main():
         # Drive the bot's inline-keyboard flow through Telegram callbacks.
         # MessageEdited is also handled because some bots edit the same message
         # after a callback instead of sending a new one.
+        if auto_playlist_stage:
+            button_labels = [
+                (getattr(button, "text", "") or "").strip()
+                for row in (getattr(message, "buttons", None) or [])
+                for button in row
+            ]
+            print(
+                f"\\n[AUTO-DEBUG] Evento={type(event).__name__}; mensagem={message.id}; "
+                f"limite={auto_min_message_id}; etapa={auto_playlist_stage}; "
+                f"texto={text[:160]!r}; botões={button_labels!r}"
+            )
         if auto_playlist_stage and message.id > auto_min_message_id:
             if auto_playlist_stage == "wait_playlist":
                 match = find_inline_button(
