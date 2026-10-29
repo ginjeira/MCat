@@ -534,8 +534,8 @@ async def main():
                 metadata_keys = {}
                 for doc_id, copies in by_document.items():
                     first = copies[0]
-                    key = (norm(first.get("performer", "")), norm(first.get("title", "")), first.get("duration"))
-                    if key[0] and key[1] and key[2] is not None:
+                    key = (norm(first.get("performer", "")), norm(first.get("title", "")), first.get("duration"), first.get("file_size"))
+                    if key[0] and key[1] and key[2] is not None and key[3] is not None and key[3] > 0:
                         metadata_keys.setdefault(key, []).append((doc_id, copies))
                 print(f"[HIST-MUSIC-FIND] Mensagens correspondentes={len(records)}; documentos distintos={len(by_document)}.")
                 print("[HIST-MUSIC-FIND] Resultados (título — intérprete; chat:mensagem):")
@@ -554,7 +554,7 @@ async def main():
                     print(f"  ... mais {len(by_document) - 40} documentos não apresentados.")
                 multi_file = [items for items in metadata_keys.values() if len(items) > 1]
                 if multi_file:
-                    print(f"[HIST-MUSIC-FIND] Atenção: {sum(len(items) for items in multi_file)} documentos agrupados em {len(multi_file)} conjuntos com título, intérprete e duração iguais, mas IDs de ficheiro diferentes.")
+                    print(f"[HIST-MUSIC-FIND] Atenção: {sum(len(items) for items in multi_file)} documentos agrupados em {len(multi_file)} conjuntos com título, intérprete, duração e tamanho iguais, mas IDs de ficheiro diferentes.")
             print("[HIST-MUSIC-FIND] Pesquisa apenas de leitura; nenhuma mensagem foi alterada, enviada ou apagada.")
         elif command == "/duplicates":
             if destination_entity is None:
@@ -584,7 +584,7 @@ async def main():
                 print(f"  [FICHEIRO REPETIDO] {label}; mensagens={ids}; document_id={group['document_id']}")
             if len(exact_groups) > 25:
                 print(f"  ... mais {len(exact_groups) - 25} grupos de documentos repetidos não apresentados.")
-            print(f"[DUPLICATES] Possíveis duplicados por título/intérprete={len(metadata_groups)} grupos (podem ser ficheiros diferentes da mesma música).")
+            print(f"[DUPLICATES] Possíveis duplicados por título/intérprete/duração/tamanho={len(metadata_groups)} grupos (podem ter IDs de documento diferentes).")
             for group in metadata_groups[:25]:
                 label = " — ".join(part for part in (group["performer"], group["title"]) if part) or "(sem título)"
                 ids = ", ".join(f'{item.get("chat_id", destination_entity.id)}:{item["message_id"]}' for item in group["records"])
