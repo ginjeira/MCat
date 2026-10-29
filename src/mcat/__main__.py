@@ -228,6 +228,69 @@ async def main():
     dry_run = True
     destination_indexed = False
 
+    async def select_playlist_choice(message):
+        """Select the requested playlist only after the filter callback has completed."""
+        global auto_playlist_stage
+        target = str(auto_choice_number)
+        text = message.message or ""
+        is_playlist_results = bool(re.search(r"\bin\s+['\"]?playlist['\"]?", text, re.I))
+        choice = find_inline_button(
+            message,
+            lambda label: bool(re.fullmatch(r"\D*" + re.escape(target) + r"\D*", label.strip())),
+        )
+        if not is_playlist_results or not choice:
+            print(
+                f"\n[AUTO-CHOICE] Não foi possível selecionar {target!r}: "
+                f"modo_playlist={is_playlist_results}; botão_encontrado={bool(choice)}."
+            )
+            auto_playlist_stage = None
+            return
+
+        row_index, column_index, label = choice
+        button_object = message.buttons[row_index][column_index]
+        raw_button = getattr(button_object, "button", button_object)
+        button_type = getattr(raw_button, "type", None)
+        callback_data = getattr(button_type, "data", None)
+        print(
+            f"\n[AUTO-CHOICE-DEBUG] mensagem={message.id}; opção={label!r}; "
+            f"button_type={type(button_type).__name__}; "
+            f"callback_data={callback_data!r}; "
+            f"callback_bytes={len(callback_data) if isinstance(callback_data, bytes) else None}"
+        )
+
+        callback_error = None
+        try:
+            callback_result = await send_inline_callback(message, row_index, column_index)
+            print(
+                f"\n[AUTO-CLICK] Callback da playlist {label!r}: "
+                f"resposta={type(callback_result).__name__}; "
+                f"mensagem_resposta={getattr(callback_result, 'message', None)!r}; "
+                f"alerta={getattr(callback_result, 'alert', None)!r}; "
+                f"url={getattr(callback_result, 'url', None)!r}"
+            )
+        except Exception as exc:
+            callback_error = exc
+            print(
+                f"\n[AUTO-CLICK] Callback da playlist {label!r} terminou com "
+                f"{type(exc).__name__}: {exc}"
+            )
+
+        # A timeout may be late/no-answer despite the bot having accepted the callback.
+        await asyncio.sleep(1.0)
+        recent = await client.get_messages(bot_entity, limit=8)
+        newer = [item for item in (recent or []) if item.id > message.id]
+        print(
+            f"[AUTO-VERIFY-CHOICE] mensagem_origem={message.id}; "
+            f"mensagens_posteriores={[(item.id, (item.message or '')[:120]) for item in newer]!r}"
+        )
+        if callback_error is None:
+            print("[AUTO-CHOICE] Callback confirmado pelo Telegram.")
+        elif newer:
+            print("[AUTO-CHOICE] Houve atividade posterior do bot apesar do timeout do callback.")
+        else:
+            print("[AUTO-CHOICE] Sem confirmação; não será repetido automaticamente.")
+        auto_playlist_stage = None
+
     @client.on(events.MessageEdited(chats=bot_entity))
     @client.on(events.NewMessage(chats=bot_entity))
     async def on_bot_message(event):
@@ -236,16 +299,14 @@ async def main():
         message = event.message
         text = message.message or ""
 
-        # Drive the inline keyboard safely. The bot edits the SAME message when
-        # a category filter is toggled, so stage transitions must allow edited
-        # messages whose ID is still above the original query message.
+        # Keep each phase single-flight. In particular, do not expose the
+        # numbered-choice stage while the filter callback is still in flight.
         if auto_playlist_stage and message.id > auto_min_message_id:
             buttons = [
                 (row_index, column_index, (getattr(button, "text", "") or "").strip())
                 for row_index, row in enumerate(getattr(message, "buttons", None) or [])
                 for column_index, button in enumerate(row)
             ]
-            target = str(auto_choice_number)
             is_track_results = bool(re.search(r"\bin\s+['\"]?track['\"]?", text, re.I))
             is_playlist_results = bool(re.search(r"\bin\s+['\"]?playlist['\"]?", text, re.I))
             playlist_buttons = [
@@ -253,143 +314,62 @@ async def main():
                 for row_index, column_index, label in buttons
                 if norm(label) == "playlists"
             ]
-            choice_matches = [
-                (row_index, column_index, label)
-                for row_index, column_index, label in buttons
-                if re.fullmatch(r"\D*" + re.escape(target) + r"\D*", label.strip())
-            ]
             print(
                 f"\n[AUTO-DEBUG] Evento={type(event).__name__}; mensagem={message.id}; "
                 f"limite={auto_min_message_id}; etapa={auto_playlist_stage}; "
                 f"modo_track={is_track_results}; modo_playlist={is_playlist_results}; "
-                f"texto={text[:160]!r}; botões={[label for _, _, label in buttons]!r}; "
-                f"matches_playlist={playlist_buttons!r}; matches_opção_{target}={choice_matches!r}"
+                f"texto={text[:160]!r}; botões={[label for _, _, label in buttons]!r}"
             )
 
             if auto_playlist_stage == "wait_playlist":
-                # Only toggle Playlists when results are explicitly track results
-                # and the category is currently unchecked.
                 unchecked = next(
                     (item for item in playlist_buttons if item[2].startswith("☑")),
                     None,
                 )
                 if is_track_results and unchecked:
                     row_index, column_index, label = unchecked
-                    button_object = message.buttons[row_index][column_index]
-                    raw_button = getattr(button_object, "button", button_object)
-                    button_type = getattr(raw_button, "type", None)
-                    callback_data = getattr(button_type, "data", None)
-                    auto_playlist_stage = "wait_choice"
-                    print(
-                        f"\\n[AUTO-BUTTON] classe={type(button_object).__name__}; "
-                        f"classe_interna={type(raw_button).__name__}; "
-                        f"tem_callback_data={callback_data is not None}; "
-                        f"callback_data_bytes={len(callback_data) if isinstance(callback_data, bytes) else None}; "
-                        f"url={getattr(raw_button, 'url', None)!r}; "
-                        f"repr={raw_button!r}; "
-                        f"stringify={raw_button.stringify() if hasattr(raw_button, 'stringify') else None!r}; "
-                        f"module={type(raw_button).__module__}"
-                    )
+                    # Claim the transition before the first await: edited/new events
+                    # must not start a second callback while this one is running.
+                    auto_playlist_stage = "toggling"
                     try:
-                        try:
-                            callback_result = await click_inline_button(message, row_index, column_index)
-                            print(
-                                f"\n[AUTO-CLICK] Pedido de clique enviado para {label!r}; "
-                                f"resposta={type(callback_result).__name__}; "
-                                f"mensagem_resposta={getattr(callback_result, 'message', None)!r}; "
-                                f"alerta={getattr(callback_result, 'alert', None)!r}; "
-                                f"url={getattr(callback_result, 'url', None)!r}"
-                            )
-                        except Exception as callback_exc:
-                            # A bot may process the click but fail to answer the callback query.
-                            # In that case Telegram raises a timeout despite the message update.
-                            if type(callback_exc).__name__ != "BotResponseTimeoutError":
-                                raise
-                            callback_result = None
-                            print(
-                                f"\n[AUTO-CLICK] Sem confirmação do callback "
-                                f"({type(callback_exc).__name__}); a verificar a mensagem."
-                            )
-                        # Verify the resulting state even when Telegram reports a callback timeout.
-                        await asyncio.sleep(1.0)
-                        refreshed = await client.get_messages(bot_entity, ids=message.id)
-                        if refreshed:
-                            refreshed_text = refreshed.message or ""
-                            refreshed_buttons = [
-                                (getattr(button, "text", "") or "").strip()
-                                for row in (getattr(refreshed, "buttons", None) or [])
-                                for button in row
-                            ]
-                            refreshed_is_playlist = bool(
-                                re.search(r"\bin\s+['\"]?playlist['\"]?", refreshed_text, re.I)
-                            )
-                            print(
-                                f"\n[AUTO-VERIFY] mensagem={refreshed.id}; "
-                                f"modo_playlist={refreshed_is_playlist}; "
-                                f"texto={refreshed_text[:180]!r}; "
-                                f"botão_playlists={[b for b in refreshed_buttons if 'playlist' in norm(b)]!r}"
-                            )
-                            if not refreshed_is_playlist:
-                                auto_playlist_stage = None
-                                print("[AUTO-VERIFY] O filtro não mudou para playlists; automatização interrompida sem selecionar nenhuma opção.")
-                        else:
-                            auto_playlist_stage = None
-                            print(f"\n[AUTO-VERIFY] Não foi possível reler a mensagem {message.id}; automatização interrompida.")
-                    except Exception as exc:
-                        auto_playlist_stage = None
-                        print(f"\n[AUTO-CLICK] Falha ao clicar/verificar {label!r}: {type(exc).__name__}: {exc}")
-                else:
-                    print("[AUTO-TRACE] Sem clique: a mensagem não é uma lista de faixas com o filtro Playlists desmarcado.")
-            elif auto_playlist_stage == "wait_choice":
-                # Never choose a numbered item until the bot confirms it has
-                # switched the search mode to playlists (usually via MessageEdited).
-                if is_playlist_results and choice_matches:
-                    row_index, column_index, label = choice_matches[0]
-                    button_object = message.buttons[row_index][column_index]
-                    raw_button = getattr(button_object, "button", button_object)
-                    button_type = getattr(raw_button, "type", None)
-                    callback_data = getattr(button_type, "data", None)
-                    print(
-                        f"\n[AUTO-CHOICE-DEBUG] mensagem={message.id}; opção={label!r}; "
-                        f"button_type={type(button_type).__name__}; "
-                        f"callback_data={callback_data!r}; "
-                        f"callback_bytes={len(callback_data) if isinstance(callback_data, bytes) else None}"
-                    )
-                    callback_error = None
-                    try:
-                        callback_result = await send_inline_callback(message, row_index, column_index)
+                        callback_result = await click_inline_button(message, row_index, column_index)
                         print(
-                            f"\n[AUTO-CLICK] Callback da playlist {label!r}: "
+                            f"\n[AUTO-CLICK] Pedido de clique enviado para {label!r}; "
                             f"resposta={type(callback_result).__name__}; "
                             f"mensagem_resposta={getattr(callback_result, 'message', None)!r}; "
                             f"alerta={getattr(callback_result, 'alert', None)!r}; "
                             f"url={getattr(callback_result, 'url', None)!r}"
                         )
                     except Exception as exc:
-                        callback_error = exc
-                        print(
-                            f"\n[AUTO-CLICK] Callback da playlist {label!r} falhou: "
-                            f"{type(exc).__name__}: {exc}"
-                        )
-
-                    # A timeout is not proof that the bot ignored the callback.
-                    # Inspect recent bot messages before reporting whether it progressed.
-                    await asyncio.sleep(1.0)
-                    recent = await client.get_messages(bot_entity, limit=8)
-                    newer = [
-                        item for item in (recent or [])
-                        if item.id > message.id
-                    ]
-                    print(
-                        f"[AUTO-VERIFY-CHOICE] mensagem_origem={message.id}; "
-                        f"mensagens_posteriores={[(item.id, (item.message or '')[:120]) for item in newer]!r}"
-                    )
-                    if callback_error is None:
                         auto_playlist_stage = None
+                        print(f"\n[AUTO-CLICK] Falha ao clicar em {label!r}: {type(exc).__name__}: {exc}")
+                        return
+
+                    await asyncio.sleep(0.5)
+                    refreshed = await client.get_messages(bot_entity, ids=message.id)
+                    refreshed_text = (refreshed.message or "") if refreshed else ""
+                    refreshed_is_playlist = bool(
+                        re.search(r"\bin\s+['\"]?playlist['\"]?", refreshed_text, re.I)
+                    )
+                    print(
+                        f"\n[AUTO-VERIFY] mensagem={message.id}; "
+                        f"modo_playlist={refreshed_is_playlist}; texto={refreshed_text[:180]!r}"
+                    )
+                    if refreshed and refreshed_is_playlist:
+                        # Mark the choice phase as busy before selecting from the
+                        # refreshed message; event handlers cannot race this click.
+                        auto_playlist_stage = "selecting"
+                        await select_playlist_choice(refreshed)
                     else:
                         auto_playlist_stage = None
+                        print("[AUTO-VERIFY] O filtro não mudou para playlists; seleção interrompida.")
                 else:
-                    print("[AUTO-TRACE] À espera dos resultados de playlists; não foi clicada nenhuma opção numerada.")
+                    print("[AUTO-TRACE] À espera de resultados de faixas com o filtro Playlists desmarcado.")
+            elif auto_playlist_stage == "wait_choice" and is_playlist_results:
+                # Compatibility path for a playlist result arriving after the filter phase.
+                auto_playlist_stage = "selecting"
+                await select_playlist_choice(message)
+            # 'toggling' and 'selecting' intentionally ignore concurrent events.
 
         if not forwarding_armed:
             save_observation(message)
