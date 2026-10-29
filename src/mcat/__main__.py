@@ -249,7 +249,10 @@ async def main():
                         f"classe_interna={type(raw_button).__name__}; "
                         f"tem_callback_data={callback_data is not None}; "
                         f"callback_data_bytes={len(callback_data) if isinstance(callback_data, bytes) else None}; "
-                        f"url={getattr(raw_button, 'url', None)!r}"
+                        f"url={getattr(raw_button, 'url', None)!r}; "
+                        f"repr={raw_button!r}; "
+                        f"stringify={raw_button.stringify() if hasattr(raw_button, 'stringify') else None!r}; "
+                        f"module={type(raw_button).__module__}"
                     )
                     try:
                         callback_result = await message.click(i=row_index, j=column_index)
