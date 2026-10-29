@@ -203,6 +203,7 @@ async def main():
                                 sent=await client.forward_messages(destination_entity,source)
                                 sent=sent[0] if isinstance(sent,list) else sent
                                 db.execute("UPDATE playlist_items SET status='forwarded',forwarded_message_id=? WHERE playlist_id=? AND source_message_id=?",(getattr(sent,"id",None),active["id"],item["source_message_id"]))
+                                save_observation(source_message, forwarded=True, dest_id=destination_entity.id, dest_message_ids=str(getattr(sent,"id","")))
                                 if item["document_id"] and sent:
                                     db.execute("INSERT OR IGNORE INTO destination_media VALUES(?,?,?,?)",(destination_entity.id,item["document_id"],sent.id,now_iso()))
                         except Exception as exc:
