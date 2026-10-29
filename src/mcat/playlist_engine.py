@@ -84,13 +84,14 @@ def playlist_delivery_summary(db, playlist_id):
     ).fetchall()
     counts = {row["status"]: row["n"] for row in rows}
     duplicate = counts.get("duplicate", 0)
+    playlist_duplicates = counts.get("duplicate_in_playlist", 0)
     forwarded = counts.get("forwarded", 0)
-    # Every processed non-duplicate item was absent from the destination index
-    # when the playlist was evaluated. This includes failures/missing source
-    # messages, which remain visible in the separate outcome status counts.
-    new = sum(n for status, n in counts.items() if status != "duplicate")
+    # Missing/error outcomes are still new items that were absent from the
+    # destination index, but their delivery outcome is reported separately.
+    new = sum(n for status, n in counts.items() if status not in ("duplicate", "duplicate_in_playlist"))
     return {
         "existing": duplicate,
+        "playlist_duplicates": playlist_duplicates,
         "new": new,
         "forwarded": forwarded,
         "dry_run": counts.get("dry_run", 0),
