@@ -394,6 +394,10 @@ async def main():
                 print("Uso: /search <termo> [número_da_opção]")
                 continue
             current_label = norm(current_query).replace(" ", "-") or "sem-etiqueta"
+            # Establish a lower message-ID boundary before sending the query,
+            # so an immediate bot response cannot race the state initialization.
+            latest_bot_messages = await client.get_messages(bot_entity, limit=1)
+            auto_min_message_id = latest_bot_messages[0].id if latest_bot_messages else 0
             auto_playlist_stage = "wait_playlist"
             forwarding_armed = True
             dry_run = True
