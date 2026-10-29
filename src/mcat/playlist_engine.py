@@ -78,12 +78,16 @@ def index_destination_media(db, chat_id, messages):
         doc=media_document_id(message)
         if doc:
             metadata = audio_metadata(message) or {}
+            # Telegram sometimes serves a message as a MessageService / wrapper;
+            # keep missing attributes NULL rather than inventing duration.
             db.execute("""INSERT INTO destination_media
                 (destination_chat_id,document_id,destination_message_id,seen_at,title,performer,duration)
                 VALUES(?,?,?,?,?,?,?)
                 ON CONFLICT(destination_chat_id,document_id,destination_message_id) DO UPDATE SET
-                title=excluded.title, performer=excluded.performer, duration=excluded.duration""",
-                (chat_id,doc,message.id,now_iso(),metadata.get("title"),metadata.get("performer"),metadata.get("duration")))
+                title=COALESCE(excluded.title,destination_media.title),
+                performer=COALESCE(excluded.performer,destination_media.performer),
+                duration=COALESCE(excluded.duration,destination_media.duration)""",
+                (chat_id,doc,message.id,now_iso(),metadata.get("title") or None,metadata.get("performer") or None,metadata.get("duration")))
             count+=1
     db.commit()
     return count
