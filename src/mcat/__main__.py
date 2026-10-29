@@ -469,24 +469,36 @@ async def main():
                 continue
             query = norm(" ".join(args))
             query_terms = query.split()
+            # Common spelling variants in titles, e.g. "Of" vs "O'" in Sweet Child O' Mine.
+            token_aliases = {"of": {"of", "o"}, "o": {"o", "of"}}
             print(f"[HIST-MUSIC-FIND] Pesquisa={query!r}; a consultar metadados dos históricos configurados...")
             records = []
+            total_scanned = 0
+            total_audio = 0
             for dedup_entity in dedup_entities:
                 chat_count = 0
+                chat_scanned = 0
+                chat_audio = 0
                 try:
                     async for history_message in client.iter_messages(dedup_entity, limit=None, filter=InputMessagesFilterMusic):
+                        chat_scanned += 1
+                        total_scanned += 1
                         record = audio_metadata(history_message)
                         if not record:
                             continue
+                        chat_audio += 1
+                        total_audio += 1
                         record["chat_id"] = dedup_entity.id
                         record["chat_title"] = getattr(dedup_entity, "title", str(dedup_entity.id))
                         haystack = norm(" ".join((record.get("performer") or "", record.get("title") or "")))
-                        if all(term in haystack for term in query_terms):
+                        haystack_tokens = set(haystack.split())
+                        if query and all(any(alias in haystack_tokens for alias in token_aliases.get(term, {term})) for term in query_terms):
                             records.append(record)
                             chat_count += 1
-                    print(f"[HIST-MUSIC-FIND] Chat={dedup_entity.id} ({getattr(dedup_entity, 'title', str(dedup_entity.id))}); correspondências={chat_count}.")
+                    print(f"[HIST-MUSIC-FIND] Chat={dedup_entity.id} ({getattr(dedup_entity, 'title', str(dedup_entity.id))}); mensagens Music={chat_scanned}; áudio com metadados={chat_audio}; correspondências={chat_count}.")
                 except Exception as exc:
                     print(f"[HIST-MUSIC-FIND] ERRO ao consultar chat {getattr(dedup_entity, 'id', '?')}: {type(exc).__name__}: {exc}")
+            print(f"[HIST-MUSIC-FIND] Total consultado: mensagens Music={total_scanned}; áudio com metadados={total_audio}.")
             if not records:
                 print("[HIST-MUSIC-FIND] Nenhuma correspondência encontrada nos metadados de áudio acessíveis.")
             else:
