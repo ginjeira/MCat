@@ -29,19 +29,19 @@ def init_playlist_schema(db):
       UNIQUE(source_chat_id,start_message_id));
     CREATE TABLE IF NOT EXISTS playlist_items (
       playlist_id INTEGER NOT NULL, source_chat_id INTEGER NOT NULL, source_message_id INTEGER NOT NULL,
-      document_id TEXT, title TEXT, performer TEXT, duration INTEGER,
+      document_id TEXT, title TEXT, performer TEXT, duration INTEGER, file_size INTEGER,
       position INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
       forwarded_message_id INTEGER, error TEXT, PRIMARY KEY(source_chat_id,source_message_id));
     CREATE TABLE IF NOT EXISTS destination_media (
       destination_chat_id INTEGER NOT NULL, document_id TEXT NOT NULL,
       destination_message_id INTEGER NOT NULL, seen_at TEXT NOT NULL,
-      title TEXT, performer TEXT, duration INTEGER,
+      title TEXT, performer TEXT, duration INTEGER, file_size INTEGER,
       PRIMARY KEY(destination_chat_id,document_id,destination_message_id));
     """)
     # Migrate databases created by earlier versions.
     for table in ("playlist_items", "destination_media"):
         columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
-        for column, sql_type in (("title", "TEXT"), ("performer", "TEXT"), ("duration", "INTEGER")):
+        for column, sql_type in (("title", "TEXT"), ("performer", "TEXT"), ("duration", "INTEGER"), ("file_size", "INTEGER")):
             if column not in columns:
                 db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
     db.commit()
@@ -59,8 +59,8 @@ def active_playlist(db, chat_id):
 def add_media(db, playlist_id, chat_id, message_id, document_id, metadata=None):
     pos=db.execute("SELECT COALESCE(MAX(position),0)+1 FROM playlist_items WHERE playlist_id=?",(playlist_id,)).fetchone()[0]
     metadata = metadata or {}
-    db.execute("INSERT OR IGNORE INTO playlist_items(playlist_id,source_chat_id,source_message_id,document_id,title,performer,duration,position,status) VALUES(?,?,?,?,?,?,?,?,'pending')",
-               (playlist_id,chat_id,message_id,document_id,metadata.get("title"),metadata.get("performer"),metadata.get("duration"),pos))
+    db.execute("INSERT OR IGNORE INTO playlist_items(playlist_id,source_chat_id,source_message_id,document_id,title,performer,duration,file_size,position,status) VALUES(?,?,?,?,?,?,?,?,?,'pending')",
+               (playlist_id,chat_id,message_id,document_id,metadata.get("title"),metadata.get("performer"),metadata.get("duration"),metadata.get("file_size"),pos))
     db.commit()
 
 def finish_playlist(db, playlist_id, message_id):
@@ -81,13 +81,14 @@ def index_destination_media(db, chat_id, messages):
             # Telegram sometimes serves a message as a MessageService / wrapper;
             # keep missing attributes NULL rather than inventing duration.
             db.execute("""INSERT INTO destination_media
-                (destination_chat_id,document_id,destination_message_id,seen_at,title,performer,duration)
-                VALUES(?,?,?,?,?,?,?)
+                (destination_chat_id,document_id,destination_message_id,seen_at,title,performer,duration,file_size)
+                VALUES(?,?,?,?,?,?,?,?)
                 ON CONFLICT(destination_chat_id,document_id,destination_message_id) DO UPDATE SET
                 title=COALESCE(excluded.title,destination_media.title),
                 performer=COALESCE(excluded.performer,destination_media.performer),
-                duration=COALESCE(excluded.duration,destination_media.duration)""",
-                (chat_id,doc,message.id,now_iso(),metadata.get("title") or None,metadata.get("performer") or None,metadata.get("duration")))
+                duration=COALESCE(excluded.duration,destination_media.duration),
+                file_size=COALESCE(excluded.file_size,destination_media.file_size)""",
+                (chat_id,doc,message.id,now_iso(),metadata.get("title") or None,metadata.get("performer") or None,metadata.get("duration"),metadata.get("file_size")))
             count+=1
     db.commit()
     return count
@@ -140,6 +141,7 @@ def audio_metadata(message):
         "title": (title or "").strip(),
         "performer": (performer or "").strip(),
         "duration": getattr(audio_attr, "duration", None) if audio_attr else None,
+        "file_size": getattr(document, "size", None),
         "mime_type": mime_type,
     }
 
@@ -152,7 +154,7 @@ def norm_metadata(value):
 
 
 def duplicate_groups(records):
-    """Group exact Telegram documents and tracks with identical title, performer and duration."""
+    """Group exact Telegram documents and tracks with identical title, performer, duration and size."""
     from collections import defaultdict
 
     exact = defaultdict(list)
@@ -162,17 +164,18 @@ def duplicate_groups(records):
         title = norm_metadata(record.get("title"))
         performer = norm_metadata(record.get("performer"))
         duration = record.get("duration")
-        if title and performer and duration is not None:
-            metadata[(performer, title, duration)].append(record)
+        file_size = record.get("file_size")
+        if title and performer and duration is not None and file_size is not None and file_size > 0:
+            metadata[(performer, title, duration, file_size)].append(record)
     exact_groups = [
         {"document_id": doc_id, "records": items}
         for doc_id, items in exact.items() if len(items) > 1
     ]
     metadata_groups = [
-        {"performer": key[0], "title": key[1], "duration": key[2], "records": items}
+        {"performer": key[0], "title": key[1], "duration": key[2], "file_size": key[3], "records": items}
         for key, items in metadata.items()
         if len(items) > 1 and len({item["document_id"] for item in items}) > 1
     ]
     exact_groups.sort(key=lambda group: (-len(group["records"]), group["document_id"]))
-    metadata_groups.sort(key=lambda group: (-len(group["records"]), group["performer"], group["title"], group["duration"]))
+    metadata_groups.sort(key=lambda group: (-len(group["records"]), group["performer"], group["title"], group["duration"], group["file_size"]))
     return exact_groups, metadata_groups
