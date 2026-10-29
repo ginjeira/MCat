@@ -6,7 +6,7 @@ import shlex
 import sqlite3
 import unicodedata
 
-from .playlist_engine import add_media, active_playlist, destination_has_media, finish_playlist, index_destination_media, init_playlist_schema, is_finished, is_playlist_start, media_document_id, playlist_delivery_summary, start_playlist
+from .playlist_engine import add_media, active_playlist, audio_metadata, destination_has_media, duplicate_groups, finish_playlist, index_destination_media, init_playlist_schema, is_finished, is_playlist_start, media_document_id, playlist_delivery_summary, start_playlist
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -293,6 +293,39 @@ async def main():
             destination_indexed = True
             total = db.execute("SELECT COUNT(DISTINCT document_id) n FROM destination_media WHERE destination_chat_id=?",(destination_entity.id,)).fetchone()["n"]
             print(f"Indexadas {count} mensagens multimédia; {total} identificadores distintos. A API consulta o histórico, não a vista Music da aplicação.")
+        elif command == "/duplicates":
+            if destination_entity is None:
+                print("Destino não resolvido; verifica TG_DESTINATION.")
+                continue
+            print("[DUPLICATES] A analisar o histórico acessível de GinjMusic (só metadados; sem descarregar ficheiros)...")
+            records = []
+            scanned = 0
+            async for history_message in client.iter_messages(destination_entity, limit=None):
+                scanned += 1
+                record = audio_metadata(history_message)
+                if record:
+                    records.append(record)
+            exact_groups, metadata_groups = duplicate_groups(records)
+            exact_occurrences = sum(len(group["records"]) - 1 for group in exact_groups)
+            print(f"[DUPLICATES] Mensagens analisadas={scanned}; ficheiros de áudio identificados={len(records)}.")
+            print(f"[DUPLICATES] Repetições exatas do mesmo documento Telegram={len(exact_groups)} grupos ({exact_occurrences} ocorrências adicionais).")
+            for group in exact_groups[:25]:
+                first = group["records"][0]
+                label = " — ".join(part for part in (first.get("performer"), first.get("title")) if part) or "(sem título/intérprete)"
+                ids = ", ".join(str(item["message_id"]) for item in group["records"])
+                print(f"  [FICHEIRO REPETIDO] {label}; mensagens={ids}; document_id={group['document_id']}")
+            if len(exact_groups) > 25:
+                print(f"  ... mais {len(exact_groups) - 25} grupos de documentos repetidos não apresentados.")
+            print(f"[DUPLICATES] Possíveis duplicados por título/intérprete={len(metadata_groups)} grupos (podem ser ficheiros diferentes da mesma música).")
+            for group in metadata_groups[:25]:
+                label = " — ".join(part for part in (group["performer"], group["title"]) if part) or "(sem título)"
+                ids = ", ".join(str(item["message_id"]) for item in group["records"])
+                print(f"  [POSSÍVEL DUPLICADO] {label}; mensagens={ids}; ficheiros distintos={len({item['document_id'] for item in group['records']})}")
+            if len(metadata_groups) > 25:
+                print(f"  ... mais {len(metadata_groups) - 25} grupos por metadados não apresentados.")
+            if not exact_groups and not metadata_groups:
+                print("[DUPLICATES] Não foram encontrados grupos de duplicados com os metadados disponíveis.")
+            print("[DUPLICATES] Auditoria apenas de leitura; nenhuma mensagem foi alterada ou apagada.")
         elif command == "/disarm":
             forwarding_armed = False
             print("Recolha desativada. O processamento termina quando chega Finished.")
