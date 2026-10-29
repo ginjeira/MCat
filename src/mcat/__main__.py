@@ -210,6 +210,7 @@ async def main():
                             db.execute("UPDATE playlist_items SET status='error',error=? WHERE playlist_id=? AND source_message_id=?",(str(exc)[:500],active["id"],item["source_message_id"]))
                     db.commit()
             print("[PLAYLIST] Concluída em modo simulação." if dry_run else "[PLAYLIST] Processamento real terminado.")
+            dry_run = True  # autorização real aplica-se apenas a uma playlist
             save_observation(message)
             print("> ", end="", flush=True)
             return
