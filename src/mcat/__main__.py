@@ -452,7 +452,7 @@ async def main():
             print(f"[DUPLICATES] Possíveis duplicados por título/intérprete={len(metadata_groups)} grupos (podem ser ficheiros diferentes da mesma música).")
             for group in metadata_groups[:25]:
                 label = " — ".join(part for part in (group["performer"], group["title"]) if part) or "(sem título)"
-                ids = ", ".join(str(item["message_id"]) for item in group["records"])
+                ids = ", ".join(f'{item.get("chat_id", destination_entity.id)}:{item["message_id"]}' for item in group["records"])
                 print(f"  [POSSÍVEL DUPLICADO] {label}; mensagens={ids}; ficheiros distintos={len({item['document_id'] for item in group['records']})}")
             if len(metadata_groups) > 25:
                 print(f"  ... mais {len(metadata_groups) - 25} grupos por metadados não apresentados.")
