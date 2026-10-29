@@ -201,22 +201,23 @@ async def main():
         message = event.message
         text = message.message or ""
 
-        # Diagnostic-only pass: report exact eligibility and predicate results
-        # before re-enabling any automated Telegram callbacks.
-        if auto_playlist_stage:
+        # Drive the inline keyboard safely. The bot edits the SAME message when
+        # a category filter is toggled, so stage transitions must allow edited
+        # messages whose ID is still above the original query message.
+        if auto_playlist_stage and message.id > auto_min_message_id:
             buttons = [
                 (row_index, column_index, (getattr(button, "text", "") or "").strip())
                 for row_index, row in enumerate(getattr(message, "buttons", None) or [])
                 for column_index, button in enumerate(row)
             ]
-            normalized_labels = [norm(label) for _, _, label in buttons]
-            eligible = message.id > auto_min_message_id
-            playlist_matches = [
-                (row_index, column_index, label, norm(label))
-                for row_index, column_index, label in buttons
-                if norm(label) in {"playlist", "playlists"}
-            ]
             target = str(auto_choice_number)
+            is_track_results = bool(re.search(r"\bin\s+['\"]?track['\"]?", text, re.I))
+            is_playlist_results = bool(re.search(r"\bin\s+['\"]?playlist['\"]?", text, re.I))
+            playlist_buttons = [
+                (row_index, column_index, label)
+                for row_index, column_index, label in buttons
+                if norm(label) == "playlists"
+            ]
             choice_matches = [
                 (row_index, column_index, label)
                 for row_index, column_index, label in buttons
@@ -224,19 +225,43 @@ async def main():
             ]
             print(
                 f"\n[AUTO-DEBUG] Evento={type(event).__name__}; mensagem={message.id}; "
-                f"limite={auto_min_message_id}; elegível={eligible}; etapa={auto_playlist_stage}; "
+                f"limite={auto_min_message_id}; etapa={auto_playlist_stage}; "
+                f"modo_track={is_track_results}; modo_playlist={is_playlist_results}; "
                 f"texto={text[:160]!r}; botões={[label for _, _, label in buttons]!r}; "
-                f"normalizados={normalized_labels!r}; "
-                f"matches_playlist={playlist_matches!r}; matches_opção_{target}={choice_matches!r}"
+                f"matches_playlist={playlist_buttons!r}; matches_opção_{target}={choice_matches!r}"
             )
-            if not eligible:
-                print("[AUTO-TRACE] Ignorada: ID da mensagem não é superior ao limite.")
-            elif auto_playlist_stage == "wait_playlist":
-                print("[AUTO-TRACE] Diagnóstico apenas: nenhum clique executado. "
-                      f"Correspondências de categoria encontradas={len(playlist_matches)}.")
+
+            if auto_playlist_stage == "wait_playlist":
+                # Only toggle Playlists when results are explicitly track results
+                # and the category is currently unchecked.
+                unchecked = next(
+                    (item for item in playlist_buttons if item[2].startswith("☑")),
+                    None,
+                )
+                if is_track_results and unchecked:
+                    row_index, column_index, label = unchecked
+                    auto_playlist_stage = "wait_choice"
+                    try:
+                        await message.click(i=row_index, j=column_index)
+                        print(f"\n[AUTO-CLICK] Filtro {label!r} selecionado; à espera dos resultados de playlists.")
+                    except Exception as exc:
+                        auto_playlist_stage = None
+                        print(f"\n[AUTO-CLICK] Falha ao selecionar filtro {label!r}: {type(exc).__name__}: {exc}")
+                else:
+                    print("[AUTO-TRACE] Sem clique: a mensagem não é uma lista de faixas com o filtro Playlists desmarcado.")
             elif auto_playlist_stage == "wait_choice":
-                print("[AUTO-TRACE] Diagnóstico apenas: nenhum clique executado. "
-                      f"Correspondências para a opção {target}={len(choice_matches)}.")
+                # Never choose a numbered item until the bot confirms it has
+                # switched the search mode to playlists (usually via MessageEdited).
+                if is_playlist_results and choice_matches:
+                    row_index, column_index, label = choice_matches[0]
+                    auto_playlist_stage = None
+                    try:
+                        await message.click(i=row_index, j=column_index)
+                        print(f"\n[AUTO-CLICK] Selecionada a playlist da opção {label!r}.")
+                    except Exception as exc:
+                        print(f"\n[AUTO-CLICK] Falha ao selecionar a playlist {label!r}: {type(exc).__name__}: {exc}")
+                else:
+                    print("[AUTO-TRACE] À espera dos resultados de playlists; não foi clicada nenhuma opção numerada.")
 
         if not forwarding_armed:
             save_observation(message)
