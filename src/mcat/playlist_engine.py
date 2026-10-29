@@ -29,13 +29,21 @@ def init_playlist_schema(db):
       UNIQUE(source_chat_id,start_message_id));
     CREATE TABLE IF NOT EXISTS playlist_items (
       playlist_id INTEGER NOT NULL, source_chat_id INTEGER NOT NULL, source_message_id INTEGER NOT NULL,
-      document_id TEXT, position INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+      document_id TEXT, title TEXT, performer TEXT, duration INTEGER,
+      position INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
       forwarded_message_id INTEGER, error TEXT, PRIMARY KEY(source_chat_id,source_message_id));
     CREATE TABLE IF NOT EXISTS destination_media (
       destination_chat_id INTEGER NOT NULL, document_id TEXT NOT NULL,
       destination_message_id INTEGER NOT NULL, seen_at TEXT NOT NULL,
+      title TEXT, performer TEXT, duration INTEGER,
       PRIMARY KEY(destination_chat_id,document_id,destination_message_id));
     """)
+    # Migrate databases created by earlier versions.
+    for table in ("playlist_items", "destination_media"):
+        columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+        for column, sql_type in (("title", "TEXT"), ("performer", "TEXT"), ("duration", "INTEGER")):
+            if column not in columns:
+                db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
     db.commit()
 
 def start_playlist(db, chat_id, message_id, title, expected):
@@ -48,10 +56,11 @@ def start_playlist(db, chat_id, message_id, title, expected):
 def active_playlist(db, chat_id):
     return db.execute("SELECT * FROM playlists WHERE source_chat_id=? AND status='collecting' ORDER BY id DESC LIMIT 1",(chat_id,)).fetchone()
 
-def add_media(db, playlist_id, chat_id, message_id, document_id):
+def add_media(db, playlist_id, chat_id, message_id, document_id, metadata=None):
     pos=db.execute("SELECT COALESCE(MAX(position),0)+1 FROM playlist_items WHERE playlist_id=?",(playlist_id,)).fetchone()[0]
-    db.execute("INSERT OR IGNORE INTO playlist_items(playlist_id,source_chat_id,source_message_id,document_id,position,status) VALUES(?,?,?,?,?,'pending')",
-               (playlist_id,chat_id,message_id,document_id,pos))
+    metadata = metadata or {}
+    db.execute("INSERT OR IGNORE INTO playlist_items(playlist_id,source_chat_id,source_message_id,document_id,title,performer,duration,position,status) VALUES(?,?,?,?,?,?,?,?,'pending')",
+               (playlist_id,chat_id,message_id,document_id,metadata.get("title"),metadata.get("performer"),metadata.get("duration"),pos))
     db.commit()
 
 def finish_playlist(db, playlist_id, message_id):
@@ -68,7 +77,13 @@ def index_destination_media(db, chat_id, messages):
     for message in messages:
         doc=media_document_id(message)
         if doc:
-            db.execute("INSERT OR IGNORE INTO destination_media VALUES(?,?,?,?)",(chat_id,doc,message.id,now_iso()))
+            metadata = audio_metadata(message) or {}
+            db.execute("""INSERT INTO destination_media
+                (destination_chat_id,document_id,destination_message_id,seen_at,title,performer,duration)
+                VALUES(?,?,?,?,?,?,?)
+                ON CONFLICT(destination_chat_id,document_id,destination_message_id) DO UPDATE SET
+                title=excluded.title, performer=excluded.performer, duration=excluded.duration""",
+                (chat_id,doc,message.id,now_iso(),metadata.get("title"),metadata.get("performer"),metadata.get("duration")))
             count+=1
     db.commit()
     return count
@@ -120,6 +135,7 @@ def audio_metadata(message):
         "message_id": getattr(message, "id", None),
         "title": (title or "").strip(),
         "performer": (performer or "").strip(),
+        "duration": getattr(audio_attr, "duration", None) if audio_attr else None,
         "mime_type": mime_type,
     }
 
