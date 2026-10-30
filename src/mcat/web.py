@@ -2,6 +2,7 @@
 import asyncio
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import secrets
@@ -238,7 +239,18 @@ def run():
     import uvicorn
     host = os.getenv("MCAT_WEB_HOST", "127.0.0.1")
     port = int(os.getenv("MCAT_WEB_PORT", "8080"))
-    uvicorn.run("mcat.web:app", host=host, port=port, proxy_headers=False)
+    certfile = os.getenv("MCAT_WEB_SSL_CERTFILE", "").strip() or None
+    keyfile = os.getenv("MCAT_WEB_SSL_KEYFILE", "").strip() or None
+    if bool(certfile) != bool(keyfile):
+        raise SystemExit("Configura MCAT_WEB_SSL_CERTFILE e MCAT_WEB_SSL_KEYFILE em conjunto.")
+    try:
+        loopback_only = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback_only = host.casefold() == "localhost"
+    if not loopback_only and not (certfile and keyfile):
+        raise SystemExit("O acesso fora do próprio servidor exige um certificado HTTPS.")
+    uvicorn.run("mcat.web:app", host=host, port=port, proxy_headers=False,
+                ssl_certfile=certfile, ssl_keyfile=keyfile)
 
 
 if __name__ == "__main__":
