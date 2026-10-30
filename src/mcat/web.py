@@ -490,8 +490,9 @@ def run():
         loopback_only = ipaddress.ip_address(host).is_loopback
     except ValueError:
         loopback_only = host.casefold() == "localhost"
-    if not loopback_only and not (certfile and keyfile):
-        raise SystemExit("O acesso fora do próprio servidor exige um certificado HTTPS.")
+    allow_http_origin = os.getenv("MCAT_WEB_ALLOW_HTTP_ORIGIN", "0").strip().casefold() in ("1", "true", "yes")
+    if not loopback_only and not (certfile and keyfile) and not allow_http_origin:
+        raise SystemExit("O acesso fora do próprio servidor exige HTTPS. Para uma origem atrás de túnel privado, define explicitamente MCAT_WEB_ALLOW_HTTP_ORIGIN=1.")
     uvicorn.run("mcat.web:app", host=host, port=port, proxy_headers=False,
                 ssl_certfile=certfile, ssl_keyfile=keyfile)
 
