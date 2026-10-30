@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="pt">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MCat — Pesquisa</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #18232f; background: #f3f6f9; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; }
+    header { background: #142c46; color: white; padding: 1rem max(1rem, calc((100vw - 960px) / 2)); display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+    header strong { font-size: 1.2rem; letter-spacing: .03em; }
+    main { max-width: 960px; margin: 2rem auto; padding: 0 1rem 3rem; }
+    .card { background: white; border: 1px solid #d9e1e8; border-radius: 12px; padding: 1.25rem; margin: 0 0 1rem; box-shadow: 0 3px 12px #1830470d; }
+    h1, h2 { margin: 0 0 .8rem; }
+    h1 { font-size: 1.5rem; }
+    h2 { font-size: 1.15rem; }
+    p { line-height: 1.5; }
+    .muted { color: #596a79; }
+    label { display: block; font-weight: 650; margin: .85rem 0 .35rem; }
+    input, select { width: 100%; min-height: 44px; border: 1px solid #aebbc7; border-radius: 7px; padding: .65rem .75rem; font: inherit; background: white; }
+    input:focus, select:focus, button:focus-visible { outline: 3px solid #91c9fc; outline-offset: 2px; }
+    .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }
+    .fields .wide { grid-column: 1 / -1; }
+    button { border: 0; border-radius: 7px; padding: .7rem 1rem; min-height: 42px; font: inherit; font-weight: 650; cursor: pointer; background: #0b6cc4; color: white; }
+    button.secondary { background: transparent; color: white; border: 1px solid #afc8df; }
+    button:disabled { cursor: not-allowed; background: #a7b5c1; color: #f7f9fb; }
+    .actions { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-top: 1rem; }
+    .notice { border-radius: 7px; padding: .7rem .85rem; margin: .8rem 0; background: #eef5fb; color: #28435c; }
+    .error { background: #fff0ef; color: #912d24; }
+    .success { background: #edf8f0; color: #245d37; }
+    .result { border: 1px solid #e0e6eb; border-radius: 8px; padding: .8rem; display: flex; align-items: flex-start; gap: .7rem; margin: .55rem 0; }
+    .result input { width: 20px; min-height: 20px; margin-top: .2rem; }
+    .result span { overflow-wrap: anywhere; }
+    .job { border-top: 1px solid #e2e8ee; padding: .8rem 0; }
+    .job:first-child { border-top: 0; }
+    .pill { display: inline-block; border-radius: 999px; background: #e9f1f8; padding: .15rem .55rem; font-size: .85rem; margin-left: .35rem; }
+    [hidden] { display: none !important; }
+    @media (max-width: 620px) { .fields { grid-template-columns: 1fr; } .fields .wide { grid-column: auto; } main { margin-top: 1rem; } }
+  </style>
+</head>
+<body>
+  <header>
+    <strong>MCat</strong>
+    <div id="account" hidden>
+      <span id="account-name"></span>
+      <button id="logout" class="secondary" type="button">Terminar sessão</button>
+    </div>
+  </header>
+  <main>
+    <section id="login-card" class="card" hidden>
+      <h1>Iniciar sessão</h1>
+      <p class="muted">Acede à pesquisa e ao acompanhamento dos teus pedidos.</p>
+      <form id="login-form">
+        <label for="username">Utilizador</label>
+        <input id="username" name="username" autocomplete="username" required>
+        <label for="password">Palavra-passe</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+        <div class="actions"><button type="submit">Entrar</button></div>
+      </form>
+      <div id="login-error" class="notice error" role="alert" hidden></div>
+    </section>
+
+    <div id="app" hidden>
+      <section class="card">
+        <h1>Pesquisar conteúdos</h1>
+        <p class="muted">Escolhe um fornecedor e um tipo de conteúdo. Podes selecionar várias opções da mesma pesquisa.</p>
+        <form id="search-form">
+          <div class="fields">
+            <div class="wide">
+              <label for="query">Termo de pesquisa</label>
+              <input id="query" name="query" minlength="2" maxlength="150" autocomplete="off" required>
+            </div>
+            <div>
+              <label for="content-type">Tipo de conteúdo</label>
+              <select id="content-type" name="content_type" required>
+                <option value="">Seleciona…</option>
+                <option value="track">Músicas / Tracks</option>
+                <option value="album">Albums</option>
+                <option value="playlist">Playlists</option>
+                <option value="artist">Artistas / Artists</option>
+              </select>
+            </div>
+            <div>
+              <label for="provider">Fornecedor</label>
+              <select id="provider" name="provider" required>
+                <option value="">Seleciona…</option>
+                <option value="deezer">Deezer</option>
+                <option value="soundcloud">SoundCloud</option>
+              </select>
+            </div>
+          </div>
+          <div class="actions"><button id="search-button" type="submit" disabled>Pesquisar</button></div>
+        </form>
+        <div id="search-message" class="notice" role="status" hidden></div>
+      </section>
+
+      <section id="results-card" class="card" hidden>
+        <h2>Resultados</h2>
+        <p id="result-summary" class="muted"></p>
+        <form id="selection-form">
+          <div id="results"></div>
+          <div class="notice">Ao confirmar, os conteúdos elegíveis serão processados e encaminhados para o destino configurado no serviço.</div>
+          <div class="actions"><button id="submit-selection" type="submit" disabled>Confirmar pedido e encaminhar</button></div>
+        </form>
+        <div id="selection-message" class="notice" role="status" hidden></div>
+      </section>
+
+      <section class="card">
+        <h2>Pedidos recentes</h2>
+        <div id="jobs"><p class="muted">A carregar pedidos…</p></div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    let csrfToken = "";
+    let currentSearch = null;
+    const $ = (id) => document.getElementById(id);
+
+    function showMessage(element, text, kind) {
+      element.textContent = text || "";
+      element.className = "notice" + (kind ? " " + kind : "");
+      element.hidden = !text;
+    }
+
+    async function api(path, options) {
+      options = options || {};
+      options.headers = Object.assign({ "Content-Type": "application/json" }, options.headers || {});
+      if (options.method && options.method !== "GET" && csrfToken) options.headers["X-CSRF-Token"] = csrfToken;
+      const response = await fetch(path, Object.assign({ credentials: "same-origin" }, options));
+      let data = {};
+      try { data = await response.json(); } catch (_) {}
+      if (!response.ok) throw new Error(data.detail || "O pedido não foi concluído.");
+      return data;
+    }
+
+    function renderResults(result) {
+      currentSearch = result;
+      $("results").replaceChildren();
+      $("result-summary").textContent = result.provider + " · " + result.content_type + " · " + result.query;
+      for (const option of result.results) {
+        const label = document.createElement("label");
+        label.className = "result";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.value = String(option.number);
+        checkbox.addEventListener("change", updateSelectionButton);
+        const text = document.createElement("span");
+        text.textContent = option.number + ". " + option.title;
+        label.append(checkbox, text);
+        $("results").append(label);
+      }
+      $("results-card").hidden = false;
+      showMessage($("search-message"), "", "");
+      updateSelectionButton();
+    }
+
+    function updateSelectionButton() {
+      $("submit-selection").disabled = !currentSearch || !$("results").querySelector("input:checked");
+    }
+
+    function renderJobs(jobs) {
+      const root = $("jobs");
+      root.replaceChildren();
+      if (!jobs.length) {
+        const empty = document.createElement("p");
+        empty.className = "muted";
+        empty.textContent = "Ainda não existem pedidos.";
+        root.append(empty);
+        return;
+      }
+      for (const job of jobs) {
+        const section = document.createElement("div");
+        section.className = "job";
+        const heading = document.createElement("strong");
+        heading.textContent = "Pedido " + job.id.slice(0, 8);
+        const state = document.createElement("span");
+        state.className = "pill";
+        state.textContent = job.status;
+        section.append(heading, state);
+        for (const item of job.items || []) {
+          const line = document.createElement("p");
+          line.textContent = item.number + ". " + item.title + " — " + item.status;
+          if (item.result) line.textContent += " (encaminhadas: " + item.result.forwarded + "; duplicados: " + item.result.duplicates + ")";
+          if (item.error) line.textContent += " — " + item.error;
+          section.append(line);
+        }
+        if (job.error) {
+          const error = document.createElement("p");
+          error.className = "muted";
+          error.textContent = job.error;
+          section.append(error);
+        }
+        root.append(section);
+      }
+    }
+
+    async function refreshJobs() {
+      if ($("app").hidden) return;
+      try {
+        const data = await api("/api/jobs");
+        renderJobs(data.jobs);
+      } catch (error) {
+        if (error.message) $("jobs").textContent = error.message;
+      }
+    }
+
+    async function initialize() {
+      try {
+        const me = await api("/api/me");
+        if (me.authenticated) {
+          csrfToken = me.csrf;
+          $("login-card").hidden = true;
+          $("app").hidden = false;
+          $("account").hidden = false;
+          $("account-name").textContent = me.username;
+          await refreshJobs();
+          window.setInterval(refreshJobs, 3000);
+        } else {
+          $("login-card").hidden = false;
+          $("app").hidden = true;
+          $("account").hidden = true;
+        }
+      } catch (error) {
+        $("login-card").hidden = false;
+        showMessage($("login-error"), error.message, "error");
+      }
+    }
+
+    $("login-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      showMessage($("login-error"), "", "");
+      try {
+        const data = await api("/api/login", { method: "POST", body: JSON.stringify({
+          username: $("username").value, password: $("password").value
+        }) });
+        csrfToken = data.csrf;
+        $("password").value = "";
+        $("login-card").hidden = true;
+        $("app").hidden = false;
+        $("account").hidden = false;
+        $("account-name").textContent = data.username;
+        await refreshJobs();
+        window.setInterval(refreshJobs, 3000);
+      } catch (error) {
+        showMessage($("login-error"), error.message, "error");
+      }
+    });
+
+    $("logout").addEventListener("click", async () => {
+      try { await api("/api/logout", { method: "POST", body: "{}" }); } catch (_) {}
+      csrfToken = "";
+      currentSearch = null;
+      $("app").hidden = true;
+      $("account").hidden = true;
+      $("results-card").hidden = true;
+      $("login-card").hidden = false;
+    });
+
+    $("search-form").addEventListener("input", () => {
+      $("search-button").disabled = !$("query").value.trim() || !$("content-type").value || !$("provider").value;
+    });
+    $("search-form").addEventListener("change", () => {
+      $("search-button").disabled = !$("query").value.trim() || !$("content-type").value || !$("provider").value;
+    });
+    $("search-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      $("search-button").disabled = true;
+      showMessage($("search-message"), "A pesquisar e a preparar os filtros…", "");
+      $("results-card").hidden = true;
+      try {
+        const result = await api("/api/search", { method: "POST", body: JSON.stringify({
+          query: $("query").value.trim(),
+          content_type: $("content-type").value,
+          provider: $("provider").value
+        }) });
+        renderResults(result);
+      } catch (error) {
+        showMessage($("search-message"), error.message, "error");
+      } finally {
+        $("search-button").disabled = !$("query").value.trim() || !$("content-type").value || !$("provider").value;
+      }
+    });
+    $("selection-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const numbers = Array.from($("results").querySelectorAll("input:checked")).map((item) => Number(item.value));
+      if (!currentSearch || !numbers.length) return;
+      if (!window.confirm("Confirmas o processamento e encaminhamento de " + numbers.length + " opção(ões) para o destino configurado?")) return;
+      $("submit-selection").disabled = true;
+      try {
+        const result = await api("/api/jobs", { method: "POST", body: JSON.stringify({
+          search_id: currentSearch.id, selected_numbers: numbers
+        }) });
+        showMessage($("selection-message"), "Pedido criado. O progresso será atualizado abaixo.", "success");
+        currentSearch = null;
+        await refreshJobs();
+      } catch (error) {
+        showMessage($("selection-message"), error.message, "error");
+      } finally {
+        updateSelectionButton();
+      }
+    });
+
+    initialize();
+  </script>
+</body>
+</html>
+
