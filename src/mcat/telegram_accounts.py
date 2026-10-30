@@ -317,8 +317,18 @@ class UserTelegramManager:
     async def search(self, username, query, content_type, provider):
         return await self._service(username).search(username, query, content_type, provider)
 
-    def create_job(self, username, search_id, selected_numbers):
-        return self._service(username).create_job(username, search_id, selected_numbers)
+    async def create_job(self, username, search_id, selected_numbers):
+        service = self._service(username)
+        if service.destination is None:
+            raise RuntimeError("Escolhe um grupo destino nas definições da conta.")
+        eligible = await self._eligible_dialogs(service)
+        if not any(entity.id == service.destination.id for entity, _ in eligible):
+            service.set_destination(None)
+            self.db.execute("UPDATE web_telegram_accounts SET destination_id=NULL,destination_title=NULL WHERE username=?",
+                            (username,))
+            self.db.commit()
+            raise RuntimeError("O grupo destino deixou de estar acessível. Escolhe outro destino.")
+        return service.create_job(username, search_id, selected_numbers)
 
     def get_jobs(self, username, job_id=None):
         service = self.services.get(username)
@@ -330,4 +340,21 @@ class UserTelegramManager:
             "SELECT id FROM web_jobs WHERE username=? ORDER BY created_at DESC LIMIT 20",
             (username,),
         ).fetchall()
-        return [{"id": row["id"], "status": "interrupted", "items": []} for row in ids]
+        return [self._get_job_from_db(username, row["id"]) for row in ids]
+
+    def _get_job_from_db(self, username, job_id):
+        job = self.db.execute("SELECT * FROM web_jobs WHERE id=? AND username=?",
+                              (job_id, username)).fetchone()
+        if not job:
+            return None
+        rows = self.db.execute(
+            "SELECT option_number,title,status,result_json,error FROM web_job_items WHERE job_id=? ORDER BY option_number",
+            (job_id,),
+        ).fetchall()
+        import json
+        return {"id": job["id"], "status": job["status"], "created_at": job["created_at"],
+                "updated_at": job["updated_at"], "error": job["error"],
+                "items": [{"number": row["option_number"], "title": row["title"],
+                           "status": row["status"],
+                           "result": json.loads(row["result_json"]) if row["result_json"] else None,
+                           "error": row["error"]} for row in rows]}
