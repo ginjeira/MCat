@@ -118,7 +118,7 @@ class TelegramWebService:
                     # style "-100..." channel id. Resolve configured numeric IDs
                     # against the account's dialogs, which also verifies access.
                     ref = self.destination_ref
-                    if re.fullmatch(r"-?\\d+", ref):
+                    if re.fullmatch(r"-?\d+", ref):
                         target_id = int(ref[4:] if ref.startswith("-100") else ref.lstrip("-"))
                         async for dialog in self.client.iter_dialogs():
                             if getattr(dialog.entity, "id", None) == target_id:
