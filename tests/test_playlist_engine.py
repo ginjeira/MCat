@@ -1,6 +1,9 @@
 import sqlite3
+import tempfile
 import unittest
-from mcat.playlist_engine import add_media, active_playlist, audio_metadata, destination_has_media, duplicate_groups, finish_playlist, init_playlist_schema, interrupt_active_playlist, interrupt_stale_playlists, is_finished, is_playlist_start, playlist_delivery_summary, start_playlist
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from mcat.playlist_engine import add_media, active_playlist, audio_metadata, destination_has_media, duplicate_groups, finish_playlist, init_playlist_schema, interrupt_active_playlist, interrupt_stale_playlists, is_finished, is_maintenance_notice, is_playlist_start, maintenance_cooldown_remaining, playlist_delivery_summary, set_maintenance_cooldown, start_playlist
 
 class PlaylistEngineTests(unittest.TestCase):
     def setUp(self):
@@ -41,6 +44,27 @@ class PlaylistEngineTests(unittest.TestCase):
         self.assertIsNone(active_playlist(self.db,456))
         states={row["id"]:row["status"] for row in self.db.execute("SELECT id,status FROM playlists")}
         self.assertEqual(states,{first:"interrupted",second:"interrupted"})
+    def test_maintenance_notice_detection(self):
+        self.assertTrue(is_maintenance_notice("The bot is under maintenance, so new downloads are paused for a few minutes."))
+        self.assertTrue(is_maintenance_notice("New downloads are paused."))
+        self.assertFalse(is_maintenance_notice("Searching for 'Pop All Stars' in 'playlist' from 'deezer'."))
+    def test_maintenance_cooldown_survives_restart_and_expires(self):
+        now=datetime(2026,10,30,16,0,tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/"mcat.sqlite3"
+            first=sqlite3.connect(path)
+            first.row_factory=sqlite3.Row
+            init_playlist_schema(first)
+            set_maintenance_cooldown(first,now=now)
+            first.close()
+
+            second=sqlite3.connect(path)
+            second.row_factory=sqlite3.Row
+            init_playlist_schema(second)
+            self.assertEqual(maintenance_cooldown_remaining(second,now=now),1800)
+            self.assertEqual(maintenance_cooldown_remaining(second,now=now+timedelta(minutes=29,seconds=59)),1)
+            self.assertEqual(maintenance_cooldown_remaining(second,now=now+timedelta(minutes=30)),0)
+            second.close()
     def test_delivery_summary(self):
         pid=start_playlist(self.db,123,10,"Pop",3)
         add_media(self.db,pid,123,11,"doc-a")
@@ -115,4 +139,5 @@ class DuplicateAuditTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 
