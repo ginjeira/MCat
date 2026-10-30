@@ -1,6 +1,8 @@
 """Playlist lifecycle and persistent deduplication helpers; no media downloads."""
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+
+MAINTENANCE_COOLDOWN_SECONDS = 30 * 60
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -37,6 +39,8 @@ def init_playlist_schema(db):
       destination_message_id INTEGER NOT NULL, seen_at TEXT NOT NULL,
       title TEXT, performer TEXT, duration INTEGER, file_size INTEGER,
       PRIMARY KEY(destination_chat_id,document_id,destination_message_id));
+    CREATE TABLE IF NOT EXISTS runtime_state (
+      key TEXT PRIMARY KEY, value TEXT NOT NULL);
     """)
     # Migrate databases created by earlier versions.
     for table in ("playlist_items", "destination_media"):
@@ -94,6 +98,58 @@ def interrupt_stale_playlists(db, note):
     )
     db.commit()
     return cursor.rowcount
+
+
+def is_maintenance_notice(text):
+    """Recognize maintenance responses from the external bot."""
+    return bool(re.search(
+        r"\bunder maintenance\b|\bmaintenance\b.*\b(?:paused|unavailable)\b|"
+        r"\bdownloads?\s+(?:are\s+)?paused\b",
+        text or "",
+        re.I | re.S,
+    ))
+
+
+def set_maintenance_cooldown(db, now=None):
+    """Persist a 30-minute request pause so a restart cannot clear it."""
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    until = current.astimezone(timezone.utc) + timedelta(seconds=MAINTENANCE_COOLDOWN_SECONDS)
+    db.execute(
+        "INSERT INTO runtime_state(key,value) VALUES('maintenance_until',?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        (until.isoformat(timespec="seconds"),),
+    )
+    db.commit()
+    return until
+
+
+def maintenance_cooldown_remaining(db, now=None):
+    """Return remaining seconds; clear expired or invalid cooldown state."""
+    row = db.execute(
+        "SELECT value FROM runtime_state WHERE key='maintenance_until'"
+    ).fetchone()
+    if row is None:
+        return 0
+    value = row["value"] if hasattr(row, "keys") else row[0]
+    try:
+        until = datetime.fromisoformat(value)
+    except (TypeError, ValueError):
+        db.execute("DELETE FROM runtime_state WHERE key='maintenance_until'")
+        db.commit()
+        return 0
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=timezone.utc)
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    remaining = (until - current.astimezone(timezone.utc)).total_seconds()
+    if remaining <= 0:
+        db.execute("DELETE FROM runtime_state WHERE key='maintenance_until'")
+        db.commit()
+        return 0
+    return max(1, int(remaining))
 
 def index_destination_media(db, chat_id, messages):
     count=0
@@ -209,4 +265,5 @@ def duplicate_groups(records):
     exact_groups.sort(key=lambda group: (-len(group["records"]), group["document_id"]))
     metadata_groups.sort(key=lambda group: (-len(group["records"]), group["performer"], group["title"], group["duration"], group["file_size"]))
     return exact_groups, metadata_groups
+
 
