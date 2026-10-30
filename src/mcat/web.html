@@ -413,7 +413,8 @@
         currentTelegramDestination = state.destination && state.destination.available ? state.destination : null;
         $("telegram-destination-label").textContent = currentTelegramDestination
           ? currentTelegramDestination.title : "Ainda não escolhido";
-        if (state.connected) await refreshTelegramDestinations();
+        if (state.ready) await refreshTelegramDestinations();
+        else $("telegram-destination-picker").hidden = true;
         updateSelectionButton();
       } catch (error) {
         showMessage($("telegram-message"), error.message, "error");
