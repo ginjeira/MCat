@@ -154,7 +154,7 @@ class UserTelegramManager:
         hint = "••••" + re.sub(r"\D", "", phone)[-4:]
         self.pending[username] = {
             "client": client, "phone": phone, "phone_code_hash": sent.phone_code_hash,
-            "phone_hint": hint, "expires": now + 600, "password_required": False,
+            "phone_hint": hint, "expires": now + 600, "password_required": False, "attempts": 0,
         }
         self.code_cooldowns[username] = now + 60
         return {"code_sent": True, "phone_hint": hint}
@@ -169,6 +169,10 @@ class UserTelegramManager:
             state["password_required"] = True
             return {"authenticated": False, "password_required": True}
         except PhoneCodeInvalidError as exc:
+            state["attempts"] += 1
+            if state["attempts"] >= 5:
+                await self._discard_pending(username)
+                raise ValueError("Demasiadas tentativas. Pede um novo código Telegram.") from exc
             raise ValueError("O código Telegram está incorreto.") from exc
         except PhoneCodeExpiredError as exc:
             await self._discard_pending(username)
@@ -185,6 +189,10 @@ class UserTelegramManager:
         try:
             await state["client"].sign_in(password=str(password))
         except PasswordHashInvalidError as exc:
+            state["attempts"] += 1
+            if state["attempts"] >= 5:
+                await self._discard_pending(username)
+                raise ValueError("Demasiadas tentativas. Pede um novo código Telegram.") from exc
             raise ValueError("A palavra-passe de verificação Telegram está incorreta.") from exc
         except Exception as exc:
             raise RuntimeError("O Telegram não confirmou a palavra-passe de verificação.") from exc
@@ -309,6 +317,12 @@ class UserTelegramManager:
                 pass
         service = self.services.pop(username, None)
         if service:
+            try:
+                await service.client.log_out()
+            except Exception as exc:
+                self.services[username] = service
+                self.worker_tasks[username] = asyncio.create_task(service.worker())
+                raise RuntimeError("O Telegram não confirmou a revogação da sessão. A conta continua ligada.") from exc
             await service.close()
         self.db.execute("DELETE FROM web_telegram_accounts WHERE username=?", (username,))
         self.db.commit()
