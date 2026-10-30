@@ -193,7 +193,7 @@ async def login(request: Request, response: Response):
                          (client_hash,)).fetchone()
     if attempt and attempt[1] > utc_text():
         raise HTTPException(status_code=429, detail="Demasiadas tentativas. Tenta novamente mais tarde.")
-    user = db.execute("SELECT password_hash,is_active FROM web_users WHERE username=?", (username,)).fetchone()
+    user = db.execute("SELECT password_hash,is_active,role FROM web_users WHERE username=?", (username,)).fetchone()
     valid_password = _verify_password(password, user["password_hash"]) if user else False
     if not user or not user["is_active"] or not valid_password:
         failures = (attempt[0] if attempt else 0) + 1
