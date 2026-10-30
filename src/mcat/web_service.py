@@ -299,6 +299,7 @@ class TelegramWebService:
                     options.append({"number": int(match.group(1)), "title": match.group(2)})
             available_numbers = {
                 int(label) for row in (getattr(result_message, "buttons", None) or [])
+                for button in row
                 for label in [re.sub(r"\D", "", self._button_label(button))]
                 if label.isdigit()
             }
