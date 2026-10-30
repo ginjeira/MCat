@@ -110,6 +110,32 @@
         <h2>Pedidos recentes</h2>
         <div id="jobs"><p class="muted">A carregar pedidos…</p></div>
       </section>
+
+      <section class="card">
+        <h2>Alterar palavra-passe</h2>
+        <form id="password-form">
+          <label for="current-password">Palavra-passe atual</label>
+          <input id="current-password" type="password" autocomplete="current-password" required>
+          <label for="new-password">Nova palavra-passe</label>
+          <input id="new-password" type="password" minlength="14" autocomplete="new-password" required>
+          <div class="actions"><button type="submit">Guardar nova palavra-passe</button></div>
+        </form>
+        <div id="password-message" class="notice" role="status" hidden></div>
+      </section>
+
+      <section id="admin-users-card" class="card" hidden>
+        <h2>Gerir utilizadores</h2>
+        <p class="muted">Só o administrador pode criar contas. Cada novo utilizador recebe acesso à própria lista de pedidos.</p>
+        <form id="create-user-form">
+          <label for="new-username">Novo utilizador</label>
+          <input id="new-username" minlength="3" maxlength="32" pattern="[A-Za-z0-9_.-]+" autocomplete="off" required>
+          <label for="new-user-password">Palavra-passe inicial</label>
+          <input id="new-user-password" type="password" minlength="14" autocomplete="new-password" required>
+          <div class="actions"><button type="submit">Criar utilizador</button></div>
+        </form>
+        <div id="user-message" class="notice" role="status" hidden></div>
+        <div id="user-list"></div>
+      </section>
     </div>
   </main>
 
@@ -158,6 +184,28 @@
 
     function updateSelectionButton() {
       $("submit-selection").disabled = !currentSearch || !$("results").querySelector("input:checked");
+    }
+
+    function setAccount(user) {
+      $("account-name").textContent = user.username + (user.role === "admin" ? " · administrador" : "");
+      $("account").hidden = false;
+      $("admin-users-card").hidden = user.role !== "admin";
+    }
+
+    async function loadAdminUsers() {
+      if ($("admin-users-card").hidden) return;
+      try {
+        const data = await api("/api/admin/users");
+        const root = $("user-list");
+        root.replaceChildren();
+        for (const user of data.users) {
+          const line = document.createElement("p");
+          line.textContent = user.username + " · " + user.role + (user.is_active ? "" : " · inativo");
+          root.append(line);
+        }
+      } catch (error) {
+        showMessage($("user-message"), error.message, "error");
+      }
     }
 
     function renderJobs(jobs) {
@@ -213,8 +261,8 @@
           csrfToken = me.csrf;
           $("login-card").hidden = true;
           $("app").hidden = false;
-          $("account").hidden = false;
-          $("account-name").textContent = me.username;
+          setAccount(me);
+          await loadAdminUsers();
           await refreshJobs();
           window.setInterval(refreshJobs, 3000);
         } else {
@@ -239,8 +287,8 @@
         $("password").value = "";
         $("login-card").hidden = true;
         $("app").hidden = false;
-        $("account").hidden = false;
-        $("account-name").textContent = data.username;
+        setAccount(data);
+        await loadAdminUsers();
         await refreshJobs();
         window.setInterval(refreshJobs, 3000);
       } catch (error) {
@@ -256,6 +304,37 @@
       $("account").hidden = true;
       $("results-card").hidden = true;
       $("login-card").hidden = false;
+    });
+
+    $("password-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      showMessage($("password-message"), "", "");
+      try {
+        await api("/api/password", { method: "POST", body: JSON.stringify({
+          current_password: $("current-password").value,
+          new_password: $("new-password").value
+        }) });
+        $("password-form").reset();
+        showMessage($("password-message"), "Palavra-passe alterada. As outras sessões foram terminadas.", "success");
+      } catch (error) {
+        showMessage($("password-message"), error.message, "error");
+      }
+    });
+
+    $("create-user-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      showMessage($("user-message"), "", "");
+      try {
+        const result = await api("/api/admin/users", { method: "POST", body: JSON.stringify({
+          username: $("new-username").value.trim(),
+          password: $("new-user-password").value
+        }) });
+        $("create-user-form").reset();
+        showMessage($("user-message"), "Utilizador " + result.username + " criado.", "success");
+        await loadAdminUsers();
+      } catch (error) {
+        showMessage($("user-message"), error.message, "error");
+      }
     });
 
     $("search-form").addEventListener("input", () => {
