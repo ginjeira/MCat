@@ -8,12 +8,21 @@ version = "0.1.0"
 description = "Telegram playlist catalog and message-forwarding proof of concept"
 requires-python = ">=3.10"
 dependencies = [
+  "fastapi>=0.115,<1.0",
   "Telethon>=1.36,<2.0",
   "python-dotenv>=1.0,<2.0",
+  "uvicorn>=0.30,<1.0",
 ]
+
+[project.scripts]
+mcat-web = "mcat.web:run"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+mcat = ["web.html"]
+
