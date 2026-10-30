@@ -71,6 +71,8 @@ Configura no ficheiro .env, que deve ser legível apenas pelo utilizador do serv
     MCAT_WEB_SSL_CERTFILE=
     MCAT_WEB_SSL_KEYFILE=
 
+Quando a base de dados ainda não tem contas web, MCAT_WEB_USERNAME e MCAT_WEB_PASSWORD criam a primeira conta administradora. As palavras-passe são guardadas como hashes PBKDF2; depois da criação inicial, o administrador pode criar contas adicionais no website e cada utilizador pode alterar a sua palavra-passe. Usa palavras-passe com pelo menos 14 caracteres.
+
 Instala/atualiza as dependências e inicia a interface:
 
     .venv/bin/pip install -e .
