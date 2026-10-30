@@ -127,7 +127,7 @@ class UserTelegramManager:
         if row["destination_id"] is not None:
             destination = {"id": row["destination_id"], "title": row["destination_title"],
                            "available": bool(service and service.destination)}
-        return {"supported": True, "connected": bool(service and service.ready),
+        return {"supported": True, "connected": True,
                 "telegram_user_id": row["telegram_user_id"], "phone_hint": row["phone_hint"],
                 "destination": destination,
                 "ready": bool(service and service.ready)}
@@ -136,7 +136,8 @@ class UserTelegramManager:
         phone = str(phone).strip()
         if not re.fullmatch(r"\+?[1-9]\d{6,14}", phone):
             raise ValueError("Indica um número Telegram válido com indicativo do país.")
-        if username in self.services:
+        existing_service = self.services.get(username)
+        if existing_service and existing_service.ready:
             raise ValueError("Esta conta Telegram já está ligada. Desliga-a antes de ligar outra.")
         now = time.monotonic()
         if self.code_cooldowns.get(username, 0) > now:
@@ -317,12 +318,13 @@ class UserTelegramManager:
                 pass
         service = self.services.pop(username, None)
         if service:
-            try:
-                await service.client.log_out()
-            except Exception as exc:
-                self.services[username] = service
-                self.worker_tasks[username] = asyncio.create_task(service.worker())
-                raise RuntimeError("O Telegram não confirmou a revogação da sessão. A conta continua ligada.") from exc
+            if service.ready:
+                try:
+                    await service.client.log_out()
+                except Exception as exc:
+                    self.services[username] = service
+                    self.worker_tasks[username] = asyncio.create_task(service.worker())
+                    raise RuntimeError("O Telegram não confirmou a revogação da sessão. A conta continua ligada.") from exc
             await service.close()
         self.db.execute("DELETE FROM web_telegram_accounts WHERE username=?", (username,))
         self.db.commit()
