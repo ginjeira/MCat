@@ -196,12 +196,33 @@ class TelegramWebService:
         try:
             await self._click(message, row_index, column_index)
         except Exception as exc:
-            # A timeout is ambiguous; inspect the updated Telegram message once,
-            # but never send a second toggle without explicit state confirmation.
+            # A callback timeout is ambiguous. Observe the same message before
+            # retrying; only retry once if Telegram still shows the old state.
             refreshed = await self._wait_message(message.id, state_predicate, timeout=8)
             if refreshed:
                 return refreshed
-            raise RuntimeError(f"O Telegram não confirmou a alteração de {label} ({type(exc).__name__}).") from exc
+            unchanged = await self.client.get_messages(self.bot, ids=message.id)
+            if not unchanged or self._filter_active(unchanged, label) != self._button_selected(current_label):
+                raise RuntimeError(
+                    f"O resultado do clique em {label} ficou ambíguo; não foi repetido."
+                ) from exc
+            retry = self._find_filter_button(unchanged, label)
+            if not retry:
+                raise RuntimeError(f"O bot removeu o filtro {label} antes da repetição.") from exc
+            try:
+                await self._click(unchanged, retry[0], retry[1])
+            except Exception as retry_exc:
+                refreshed = await self._wait_message(message.id, state_predicate, timeout=8)
+                if refreshed:
+                    return refreshed
+                raise RuntimeError(
+                    f"O Telegram não confirmou a alteração de {label} após uma repetição controlada "
+                    f"({type(retry_exc).__name__})."
+                ) from retry_exc
+            refreshed = await self._wait_message(message.id, state_predicate, timeout=8)
+            if not refreshed:
+                raise RuntimeError(f"O filtro {label} não foi confirmado após uma repetição controlada.")
+            return refreshed
         refreshed = await self._wait_message(message.id, state_predicate, timeout=8)
         if not refreshed:
             raise RuntimeError(f"O filtro {label} não foi confirmado pelo Telegram.")
