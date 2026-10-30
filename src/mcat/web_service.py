@@ -11,6 +11,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from telethon import TelegramClient, functions
+from telethon.sessions import StringSession
 from telethon.tl.types import InputMessagesFilterMusic
 
 from .playlist_engine import (
@@ -57,12 +58,14 @@ class TelegramWebService:
     }
     PROVIDERS = {"deezer": "Deezer", "soundcloud": "Soundcloud"}
 
-    def __init__(self):
+    def __init__(self, session_string=None, per_user=False):
+        self.session_string = session_string
+        self.per_user = per_user
         self.api_id = int(os.getenv("TG_API_ID", "0") or 0)
         self.api_hash = os.getenv("TG_API_HASH", "").strip()
         self.bot_name = os.getenv("TG_BOT_USERNAME", "").strip().lstrip("@")
-        self.destination_ref = os.getenv("TG_DESTINATION", "").strip()
-        self.source_refs = [item.strip() for item in os.getenv("TG_DEDUP_SOURCES", "").split(",") if item.strip()]
+        self.destination_ref = "" if per_user else os.getenv("TG_DESTINATION", "").strip()
+        self.source_refs = [] if per_user else [item.strip() for item in os.getenv("TG_DEDUP_SOURCES", "").split(",") if item.strip()]
         self.session_name = os.getenv("MCAT_WEB_TG_SESSION", "mcat_user_session")
         self.db_path = Path(os.getenv("DB_PATH", "./data/mcat.sqlite3")).expanduser()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -102,7 +105,8 @@ class TelegramWebService:
         if not all((self.api_id, self.api_hash, self.bot_name)):
             self.startup_error = "Configuração Telegram incompleta."
             return
-        self.client = TelegramClient(self.session_name, self.api_id, self.api_hash)
+        telegram_session = StringSession(self.session_string) if self.session_string is not None else self.session_name
+        self.client = TelegramClient(telegram_session, self.api_id, self.api_hash)
         try:
             await self.client.connect()
             if not await self.client.is_user_authorized():
@@ -139,6 +143,11 @@ class TelegramWebService:
                 self.startup_error = "O bot Telegram não pôde ser resolvido."
         except Exception as exc:
             self.startup_error = f"Não foi possível iniciar a ligação Telegram ({type(exc).__name__})."
+
+    def set_destination(self, entity):
+        self.destination = entity
+        self.dedup_chats = [entity]
+        self.destination_indexed = False
 
     async def close(self):
         if self.client and self.client.is_connected():
