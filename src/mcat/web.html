@@ -36,6 +36,17 @@
     .job:first-child { border-top: 0; }
     .pill { display: inline-block; border-radius: 999px; background: #e9f1f8; padding: .15rem .55rem; font-size: .85rem; margin-left: .35rem; }
     [hidden] { display: none !important; }
+    #account-menu { position: relative; }
+    #account-name { list-style: none; cursor: pointer; border: 1px solid #afc8df; border-radius: 7px; padding: .55rem .8rem; }
+    #account-name::-webkit-details-marker { display: none; }
+    #account-name::after { content: " ▾"; }
+    .account-dropdown { position: absolute; z-index: 5; right: 0; top: calc(100% + .45rem); min-width: 210px; padding: .45rem; border: 1px solid #d9e1e8; border-radius: 9px; background: white; box-shadow: 0 8px 24px #18232f24; }
+    .account-dropdown button { width: 100%; text-align: left; margin: .15rem 0; }
+    .account-dropdown button.secondary { color: #18232f; border-color: #d9e1e8; }
+    .account-settings { max-width: 680px; }
+    .user-row { display: grid; grid-template-columns: 1fr 2fr; gap: .8rem; align-items: center; padding: .8rem 0; border-top: 1px solid #e2e8ee; }
+    .user-row form { display: flex; gap: .5rem; align-items: center; }
+    .user-row input { min-width: 0; }
     @media (max-width: 620px) { .fields { grid-template-columns: 1fr; } .fields .wide { grid-column: auto; } main { margin-top: 1rem; } }
   </style>
 </head>
@@ -43,8 +54,14 @@
   <header>
     <strong>MCat</strong>
     <div id="account" hidden>
-      <span id="account-name"></span>
-      <button id="logout" class="secondary" type="button">Terminar sessão</button>
+      <details id="account-menu">
+        <summary id="account-name"></summary>
+        <div class="account-dropdown">
+          <button id="open-password" type="button">Alterar palavra-passe</button>
+          <button id="open-admin" type="button" hidden>Gerir utilizadores</button>
+          <button id="logout" class="secondary" type="button">Terminar sessão</button>
+        </div>
+      </details>
     </div>
   </header>
   <main>
@@ -111,30 +128,33 @@
         <div id="jobs"><p class="muted">A carregar pedidos…</p></div>
       </section>
 
-      <section class="card">
-        <h2>Alterar palavra-passe</h2>
-        <form id="password-form">
-          <label for="current-password">Palavra-passe atual</label>
-          <input id="current-password" type="password" autocomplete="current-password" required>
-          <label for="new-password">Nova palavra-passe</label>
-          <input id="new-password" type="password" minlength="14" autocomplete="new-password" required>
-          <div class="actions"><button type="submit">Guardar nova palavra-passe</button></div>
-        </form>
-        <div id="password-message" class="notice" role="status" hidden></div>
-      </section>
+      <section id="account-settings" class="account-settings" hidden>
+        <section id="password-card" class="card" hidden>
+          <h2>Alterar palavra-passe</h2>
+          <form id="password-form">
+            <label for="current-password">Palavra-passe atual</label>
+            <input id="current-password" type="password" autocomplete="current-password" required>
+            <label for="new-password">Nova palavra-passe</label>
+            <input id="new-password" type="password" minlength="14" autocomplete="new-password" required>
+            <div class="actions"><button type="submit">Guardar nova palavra-passe</button><button id="close-settings" type="button" class="secondary">Fechar</button></div>
+          </form>
+          <div id="password-message" class="notice" role="status" hidden></div>
+        </section>
 
-      <section id="admin-users-card" class="card" hidden>
-        <h2>Gerir utilizadores</h2>
-        <p class="muted">Só o administrador pode criar contas. Cada novo utilizador recebe acesso à própria lista de pedidos.</p>
-        <form id="create-user-form">
-          <label for="new-username">Novo utilizador</label>
-          <input id="new-username" minlength="3" maxlength="32" pattern="[A-Za-z0-9_.-]+" autocomplete="off" required>
-          <label for="new-user-password">Palavra-passe inicial</label>
-          <input id="new-user-password" type="password" minlength="14" autocomplete="new-password" required>
-          <div class="actions"><button type="submit">Criar utilizador</button></div>
-        </form>
-        <div id="user-message" class="notice" role="status" hidden></div>
-        <div id="user-list"></div>
+        <section id="admin-users-card" class="card" hidden>
+          <h2>Gerir utilizadores</h2>
+          <p class="muted">Cria contas e define ou redefine as palavras-passe iniciais. Cada utilizador vê apenas os próprios pedidos.</p>
+          <form id="create-user-form">
+            <label for="new-username">Novo utilizador</label>
+            <input id="new-username" minlength="3" maxlength="32" pattern="[A-Za-z0-9_.-]+" autocomplete="off" required>
+            <label for="new-user-password">Palavra-passe inicial</label>
+            <input id="new-user-password" type="password" minlength="14" autocomplete="new-password" required>
+            <div class="actions"><button type="submit">Criar utilizador</button></div>
+          </form>
+          <div id="user-message" class="notice" role="status" hidden></div>
+          <div id="user-list"></div>
+          <div class="actions"><button id="close-settings" type="button" class="secondary">Fechar</button></div>
+        </section>
       </section>
     </div>
   </main>
@@ -189,7 +209,16 @@
     function setAccount(user) {
       $("account-name").textContent = user.username + (user.role === "admin" ? " · administrador" : "");
       $("account").hidden = false;
-      $("admin-users-card").hidden = user.role !== "admin";
+      $("open-admin").hidden = user.role !== "admin";
+    }
+
+    function showAccountPanel(panelId) {
+      $("account-settings").hidden = false;
+      $("password-card").hidden = panelId !== "password-card";
+      $("admin-users-card").hidden = panelId !== "admin-users-card";
+      $("account-menu").open = false;
+      if (panelId === "admin-users-card") loadAdminUsers();
+      window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
     async function loadAdminUsers() {
@@ -199,8 +228,37 @@
         const root = $("user-list");
         root.replaceChildren();
         for (const user of data.users) {
-          const line = document.createElement("p");
-          line.textContent = user.username + " · " + user.role + (user.is_active ? "" : " · inativo");
+          const line = document.createElement("div");
+          line.className = "user-row";
+          const label = document.createElement("span");
+          label.textContent = user.username + " · " + user.role + (user.is_active ? "" : " · inativo");
+          line.append(label);
+          if (user.username !== $("account-name").textContent.split(" · ")[0]) {
+            const form = document.createElement("form");
+            const password = document.createElement("input");
+            password.type = "password";
+            password.minLength = 14;
+            password.autocomplete = "new-password";
+            password.placeholder = "Nova palavra-passe inicial";
+            password.required = true;
+            const submit = document.createElement("button");
+            submit.type = "submit";
+            submit.textContent = "Definir palavra-passe";
+            form.append(password, submit);
+            form.addEventListener("submit", async (event) => {
+              event.preventDefault();
+              try {
+                await api("/api/admin/users/" + encodeURIComponent(user.username) + "/password", {
+                  method: "POST", body: JSON.stringify({ password: password.value })
+                });
+                form.reset();
+                showMessage($("user-message"), "Palavra-passe de " + user.username + " atualizada.", "success");
+              } catch (error) {
+                showMessage($("user-message"), error.message, "error");
+              }
+            });
+            line.append(form);
+          }
           root.append(line);
         }
       } catch (error) {
@@ -262,7 +320,6 @@
           $("login-card").hidden = true;
           $("app").hidden = false;
           setAccount(me);
-          await loadAdminUsers();
           await refreshJobs();
           window.setInterval(refreshJobs, 3000);
         } else {
@@ -288,7 +345,6 @@
         $("login-card").hidden = true;
         $("app").hidden = false;
         setAccount(data);
-        await loadAdminUsers();
         await refreshJobs();
         window.setInterval(refreshJobs, 3000);
       } catch (error) {
@@ -296,12 +352,19 @@
       }
     });
 
+    $("open-password").addEventListener("click", () => showAccountPanel("password-card"));
+    $("open-admin").addEventListener("click", () => showAccountPanel("admin-users-card"));
+    document.querySelectorAll("#close-settings").forEach((button) => button.addEventListener("click", () => {
+      $("account-settings").hidden = true;
+    }));
+
     $("logout").addEventListener("click", async () => {
       try { await api("/api/logout", { method: "POST", body: "{}" }); } catch (_) {}
       csrfToken = "";
       currentSearch = null;
       $("app").hidden = true;
       $("account").hidden = true;
+      $("account-settings").hidden = true;
       $("results-card").hidden = true;
       $("login-card").hidden = false;
     });
