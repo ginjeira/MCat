@@ -288,6 +288,25 @@ async def create_user(request: Request):
     return {"username": username, "role": "user", "created": True}
 
 
+@app.post("/api/admin/users/{username}/password")
+async def set_user_password(username: str, request: Request):
+    session = await _require_session(request, csrf=True)
+    if session["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Só o administrador pode gerir utilizadores.")
+    password = str((await request.json()).get("password", ""))
+    if len(password) < 14:
+        raise HTTPException(status_code=400, detail="A palavra-passe deve ter pelo menos 14 caracteres.")
+    db = request.app.state.auth_db
+    target = username.strip().casefold()
+    cursor = db.execute("UPDATE web_users SET password_hash=? WHERE username=?",
+                        (_hash_password(password), target))
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Utilizador não encontrado.")
+    db.execute("DELETE FROM web_sessions WHERE username=?", (target,))
+    db.commit()
+    return {"username": target, "updated": True}
+
+
 @app.post("/api/logout")
 async def logout(request: Request):
     session = await _require_session(request, csrf=True)
