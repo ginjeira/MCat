@@ -6,7 +6,7 @@ import shlex
 import sqlite3
 import unicodedata
 
-from .playlist_engine import add_media, active_playlist, audio_metadata, destination_has_media, duplicate_groups, finish_playlist, index_destination_media, init_playlist_schema, is_finished, is_playlist_start, media_document_id, playlist_delivery_summary, start_playlist
+from .playlist_engine import add_media, active_playlist, audio_metadata, destination_has_media, duplicate_groups, finish_playlist, index_destination_media, init_playlist_schema, interrupt_active_playlist, interrupt_stale_playlists, is_finished, is_playlist_start, media_document_id, playlist_delivery_summary, start_playlist
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -44,6 +44,7 @@ auto_min_message_id = 0
 bot_entity = None
 destination_entity = None
 dedup_entities = []
+SEARCH_IDLE_TIMEOUT_SECONDS = 300
 
 
 def now_iso():
@@ -196,6 +197,11 @@ def export_csv(path):
 async def main():
     global current_query, current_label, forwarding_armed, auto_playlist_stage, auto_choice_number, auto_min_message_id, bot_entity, destination_entity, dedup_entities
     init_db()
+    stale_playlists = interrupt_stale_playlists(
+        db, "Processo reiniciado antes de Finished; encaminhamento não executado."
+    )
+    if stale_playlists:
+        print(f"[RECUPERAÇÃO] {stale_playlists} recolha(s) anterior(es) fechada(s) sem encaminhamento.")
     await client.start()
     bot_entity = await client.get_entity(BOT_USERNAME)
     if DESTINATION:
@@ -229,6 +235,55 @@ async def main():
     destination_indexed = False
     live_test_limit = None
     live_test_armed = False
+    search_generation = 0
+    active_search_generation = None
+    search_timeout_task = None
+
+    def cancel_search_timeout():
+        nonlocal search_timeout_task
+        task = search_timeout_task
+        search_timeout_task = None
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+
+    def disarm_search_state(interrupt_active=False):
+        """Fail closed and consume any one-shot live authorization."""
+        nonlocal dry_run, live_test_limit, live_test_armed, active_search_generation
+        global forwarding_armed, auto_playlist_stage
+        if active_search_generation is not None or interrupt_active:
+            interrupted = interrupt_active_playlist(
+                db, bot_entity.id, "Pesquisa interrompida antes de Finished; encaminhamento cancelado."
+            )
+            if interrupted is not None:
+                print(f"\n[PLAYLIST] Recolha {interrupted} interrompida; nenhuma faixa será encaminhada.")
+        cancel_search_timeout()
+        forwarding_armed = False
+        auto_playlist_stage = None
+        dry_run = True
+        live_test_limit = None
+        live_test_armed = False
+        active_search_generation = None
+
+    async def expire_search_after_idle(generation):
+        try:
+            await asyncio.sleep(SEARCH_IDLE_TIMEOUT_SECONDS)
+        except asyncio.CancelledError:
+            return
+        if active_search_generation != generation:
+            return
+        interrupted = interrupt_active_playlist(
+            db, bot_entity.id, f"Sem atividade do bot durante {SEARCH_IDLE_TIMEOUT_SECONDS}s; encaminhamento cancelado."
+        )
+        if interrupted is None:
+            print(f"\n[SEARCH] Sem resposta do bot durante {SEARCH_IDLE_TIMEOUT_SECONDS}s; pesquisa desarmada.")
+        else:
+            print(f"\n[PLAYLIST] Sem atividade durante {SEARCH_IDLE_TIMEOUT_SECONDS}s; recolha {interrupted} interrompida sem encaminhar.")
+        disarm_search_state()
+
+    def refresh_search_timeout(generation):
+        nonlocal search_timeout_task
+        cancel_search_timeout()
+        search_timeout_task = asyncio.create_task(expire_search_after_idle(generation))
 
     async def select_playlist_choice(message):
         """Select the requested playlist only after the filter callback has completed."""
@@ -245,7 +300,7 @@ async def main():
                 f"\n[AUTO-CHOICE] Não foi possível selecionar {target!r}: "
                 f"modo_playlist={is_playlist_results}; botão_encontrado={bool(choice)}."
             )
-            auto_playlist_stage = None
+            disarm_search_state()
             return
 
         row_index, column_index, label = choice
@@ -291,6 +346,8 @@ async def main():
             print("[AUTO-CHOICE] Houve atividade posterior do bot apesar do timeout do callback.")
         else:
             print("[AUTO-CHOICE] Sem confirmação; não será repetido automaticamente.")
+            disarm_search_state()
+            return
         auto_playlist_stage = None
 
     @client.on(events.MessageEdited(chats=bot_entity))
@@ -300,6 +357,14 @@ async def main():
         global auto_playlist_stage, auto_choice_number, auto_min_message_id
         message = event.message
         text = message.message or ""
+
+        if active_search_generation is not None and message.id > auto_min_message_id:
+            refresh_search_timeout(active_search_generation)
+            if re.search(r"daily\s+search\s+limit\s+reached|please\s+search\s+in\s+your\s+music\s+app", text, re.I):
+                print("\n[SEARCH] O bot recusou a pesquisa; autorização real cancelada e modo seguro reposto.")
+                save_observation(message)
+                disarm_search_state()
+                return
 
         # Keep each phase single-flight. In particular, do not expose the
         # numbered-choice stage while the filter callback is still in flight.
@@ -343,8 +408,8 @@ async def main():
                             f"url={getattr(callback_result, 'url', None)!r}"
                         )
                     except Exception as exc:
-                        auto_playlist_stage = None
                         print(f"\n[AUTO-CLICK] Falha ao clicar em {label!r}: {type(exc).__name__}: {exc}")
+                        disarm_search_state()
                         return
 
                     refreshed = None
@@ -371,8 +436,8 @@ async def main():
                         auto_playlist_stage = "selecting"
                         await select_playlist_choice(refreshed)
                     else:
-                        auto_playlist_stage = None
                         print("[AUTO-VERIFY] O filtro não mudou para playlists; seleção interrompida.")
+                        disarm_search_state()
                 else:
                     print("[AUTO-TRACE] À espera de resultados de faixas com o filtro Playlists desmarcado.")
             elif auto_playlist_stage == "wait_choice" and is_playlist_results:
@@ -385,6 +450,8 @@ async def main():
             save_observation(message)
             return
         start = is_playlist_start(text)
+        if start and active_search_generation is not None and message.id <= auto_min_message_id:
+            start = None
         if start:
             title, expected = start
             pid = start_playlist(db, message.chat_id, message.id, title, expected)
@@ -423,6 +490,7 @@ async def main():
                 seen_doc_ids = set()
                 seen_playlist_keys = set()
                 live_forwarded_count = 0
+                forwarding_blocked = False
                 for item in items:
                     doc_id = item["document_id"]
                     title = item["title"] or ""
@@ -441,6 +509,8 @@ async def main():
                         if has_track_key:
                             seen_playlist_keys.add(track_key)
                         db.execute("UPDATE playlist_items SET status='dry_run' WHERE playlist_id=? AND source_message_id=?",(active["id"],item["source_message_id"]))
+                    elif forwarding_blocked:
+                        db.execute("UPDATE playlist_items SET status='blocked_after_error',error='Encaminhamento interrompido após uma falha anterior.' WHERE playlist_id=? AND source_message_id=?",(active["id"],item["source_message_id"]))
                     elif live_test_limit is not None and live_forwarded_count >= live_test_limit:
                         if doc_id:
                             seen_doc_ids.add(doc_id)
@@ -452,6 +522,7 @@ async def main():
                             seen_doc_ids.add(doc_id)
                         if has_track_key:
                             seen_playlist_keys.add(track_key)
+                        delivery_confirmed = False
                         try:
                             source=await client.get_messages(bot_entity,ids=item["source_message_id"])
                             if not source or not source.media:
@@ -459,17 +530,24 @@ async def main():
                             else:
                                 sent=await client.forward_messages(destination_entity,source)
                                 sent=sent[0] if isinstance(sent,list) else sent
+                                if not sent:
+                                    raise RuntimeError("Telegram não confirmou o encaminhamento.")
+                                live_forwarded_count += 1
+                                delivery_confirmed = True
                                 db.execute("UPDATE playlist_items SET status='forwarded',forwarded_message_id=? WHERE playlist_id=? AND source_message_id=?",(getattr(sent,"id",None),active["id"],item["source_message_id"]))
-                                if sent:
-                                    live_forwarded_count += 1
+                                db.commit()
                                 save_observation(source, forwarded=True, dest_id=destination_entity.id, dest_message_ids=str(getattr(sent,"id","")))
-                                if item["document_id"] and sent:
+                                if item["document_id"]:
                                     db.execute("""INSERT OR REPLACE INTO destination_media
                                         (destination_chat_id,document_id,destination_message_id,seen_at,title,performer,duration,file_size)
                                         VALUES(?,?,?,?,?,?,?,?)""",
                                         (destination_entity.id,item["document_id"],sent.id,now_iso(),title,performer,duration,file_size))
                         except Exception as exc:
-                            db.execute("UPDATE playlist_items SET status='error',error=? WHERE playlist_id=? AND source_message_id=?",(str(exc)[:500],active["id"],item["source_message_id"]))
+                            forwarding_blocked = True
+                            if delivery_confirmed:
+                                db.execute("UPDATE playlist_items SET error=? WHERE playlist_id=? AND source_message_id=?",(str(exc)[:500],active["id"],item["source_message_id"]))
+                            else:
+                                db.execute("UPDATE playlist_items SET status='error',error=? WHERE playlist_id=? AND source_message_id=?",(str(exc)[:500],active["id"],item["source_message_id"]))
                     db.commit()
             delivery = playlist_delivery_summary(db, active["id"])
             print(
@@ -481,12 +559,12 @@ async def main():
                 f"[RESULTADO] Encaminhadas={delivery['forwarded']}; "
                 f"simulação={delivery['dry_run']}; "
                 f"limite de teste atingido={delivery['limit_reached']}; "
+                f"bloqueadas após falha={delivery['blocked_after_error']}; "
                 f"mensagens em falta={delivery['missing']}; erros={delivery['errors']}."
             )
-            print("[PLAYLIST] Concluída em modo simulação." if dry_run else "[PLAYLIST] Processamento real terminado.")
-            dry_run = True  # autorização real aplica-se apenas a uma playlist
-            live_test_limit = None
-            live_test_armed = False
+            completed_in_dry_run = dry_run
+            print("[PLAYLIST] Concluída em modo simulação." if completed_in_dry_run else "[PLAYLIST] Processamento real terminado.")
+            disarm_search_state()
             save_observation(message)
             print("> ", end="", flush=True)
             return
@@ -517,7 +595,7 @@ async def main():
             continue
         command, args = parts[0].lower(), parts[1:]
         if command in ("/quit", "/exit"):
-            forwarding_armed = False
+            disarm_search_state(interrupt_active=True)
             break
         if command == "/help":
             print("""/search <termo> [n] pesquisa e seleciona automaticamente Playlist e a opção n (por omissão 1)
@@ -551,25 +629,43 @@ async def main():
             if not current_query:
                 print("Uso: /search <termo> [número_da_opção]")
                 continue
+            if active_playlist(db, bot_entity.id) is not None:
+                print("Já existe uma playlist em recolha; a nova pesquisa foi recusada para evitar misturar resultados.")
+                continue
             current_label = norm(current_query).replace(" ", "-") or "sem-etiqueta"
-            # Establish a lower message-ID boundary before sending the query,
-            # so an immediate bot response cannot race the state initialization.
-            latest_bot_messages = await client.get_messages(bot_entity, limit=1)
-            auto_min_message_id = latest_bot_messages[0].id if latest_bot_messages else 0
-            auto_playlist_stage = "wait_playlist"
-            forwarding_armed = True
-            if live_test_armed:
-                dry_run = False
-                print(f"[LIVE-TEST] Modo real armado para esta pesquisa; máximo de {live_test_limit} músicas novas encaminhadas.")
-            else:
-                dry_run = True
-            sent_query = await client.send_message(bot_entity, current_query)
+            # Consume the one-shot token before the first await. Keep this
+            # request in dry-run until Telegram confirms that the query send
+            # completed, so an ambiguous send failure cannot authorize later.
+            requested_live_limit = live_test_limit if live_test_armed else None
+            disarm_search_state()
+            search_generation += 1
+            this_search_generation = search_generation
+            dry_run = True
+            try:
+                latest_bot_messages = await client.get_messages(bot_entity, limit=1)
+                auto_min_message_id = latest_bot_messages[0].id if latest_bot_messages else 0
+                auto_playlist_stage = "wait_playlist"
+                forwarding_armed = True
+                active_search_generation = this_search_generation
+                sent_query = await client.send_message(bot_entity, current_query)
+            except Exception as exc:
+                if active_search_generation == this_search_generation:
+                    disarm_search_state()
+                print(f"[SEARCH] Não foi possível iniciar a pesquisa; autorização real cancelada: {type(exc).__name__}: {exc}")
+                continue
+
             auto_min_message_id = sent_query.id
+            if active_search_generation == this_search_generation:
+                dry_run = requested_live_limit is None
+                live_test_limit = requested_live_limit
+                refresh_search_timeout(this_search_generation)
+                mode = f"real limitado a {requested_live_limit}" if requested_live_limit is not None else "simulação"
+            else:
+                mode = "desarmada; a resposta terminou antes de confirmar o envio"
             print(
                 f"Pesquisa enviada. MCat vai clicar automaticamente em 'Playlist' e na opção "
-                f"{auto_choice_number}; recolha ativa em modo {'real limitado' if live_test_armed else 'simulação'}."
+                f"{auto_choice_number}; recolha ativa em modo {mode}."
             )
-            live_test_armed = False
         elif command == "/live-test":
             if len(args) != 1 or not args[0].isdigit() or int(args[0]) < 1:
                 print("Uso: /live-test <limite>; exemplo: /live-test 3. Depois executa /search <termo> [n].")
@@ -584,7 +680,9 @@ async def main():
             current_label = "-".join(norm(" ".join(args)).split()) if args else "sem-etiqueta"
             print(f"Etiqueta atual: {current_label}")
         elif command == "/arm":
+            disarm_search_state(interrupt_active=True)
             forwarding_armed = True
+            dry_run = True
             print("RECOLHA ATIVA. Aguarda Total Tracks e Finished; modo simulação por omissão.")
         elif command == "/live":
             if destination_entity is None or not forwarding_armed:
@@ -840,8 +938,8 @@ async def main():
                 print("[DUPLICATES] Não foram encontrados grupos de duplicados com os metadados disponíveis.")
             print("[DUPLICATES] Auditoria apenas de leitura; nenhuma mensagem foi alterada ou apagada.")
         elif command == "/disarm":
-            forwarding_armed = False
-            print("Recolha desativada. O processamento termina quando chega Finished.")
+            disarm_search_state(interrupt_active=True)
+            print("Recolha desativada; playlist incompleta marcada como interrompida sem encaminhamento.")
         elif command == "/status":
             print_status()
         elif command == "/export":
@@ -851,7 +949,7 @@ async def main():
             export_csv(args[0])
         else:
             print("Comando desconhecido. Usa /help.")
-    forwarding_armed = False
+    disarm_search_state(interrupt_active=True)
     await client.disconnect()
     db.close()
     print("MCat terminado.")
@@ -862,3 +960,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
+
