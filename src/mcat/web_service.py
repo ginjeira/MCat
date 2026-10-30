@@ -58,9 +58,10 @@ class TelegramWebService:
     }
     PROVIDERS = {"deezer": "Deezer", "soundcloud": "Soundcloud"}
 
-    def __init__(self, session_string=None, per_user=False):
+    def __init__(self, session_string=None, per_user=False, web_username=None):
         self.session_string = session_string
         self.per_user = per_user
+        self.web_username = web_username
         self.api_id = int(os.getenv("TG_API_ID", "0") or 0)
         self.api_hash = os.getenv("TG_API_HASH", "").strip()
         self.bot_name = os.getenv("TG_BOT_USERNAME", "").strip().lstrip("@")
@@ -88,8 +89,12 @@ class TelegramWebService:
           status TEXT NOT NULL, result_json TEXT, error TEXT,
           PRIMARY KEY(job_id, option_number));
         """)
-        self.db.execute("UPDATE web_jobs SET status='interrupted',updated_at=?,error=? WHERE status IN ('queued','running')",
-                        (utc_text(), "O serviço reiniciou antes de concluir o pedido; não foi retomado automaticamente."))
+        if self.per_user and self.web_username:
+            self.db.execute("UPDATE web_jobs SET status='interrupted',updated_at=?,error=? WHERE username=? AND status IN ('queued','running')",
+                            (utc_text(), "O serviço reiniciou antes de concluir o pedido; não foi retomado automaticamente.", self.web_username))
+        else:
+            self.db.execute("UPDATE web_jobs SET status='interrupted',updated_at=?,error=? WHERE status IN ('queued','running')",
+                            (utc_text(), "O serviço reiniciou antes de concluir o pedido; não foi retomado automaticamente."))
         self.db.commit()
         self.client = None
         self.bot = None
