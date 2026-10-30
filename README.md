@@ -144,3 +144,8 @@ Para preparar uma instalação separada:
 6. Inicia `mcat-web-per-user.service` e acede por HTTPS na porta 8444.
 
 Mantém `DB_PATH` exclusivo da nova instância. Usa o mesmo `MCAT_WEB_AUTH_DB_PATH` para não criar outra base de utilizadores. Nunca partilhes o ficheiro `.env`, a chave Fernet, os códigos Telegram ou os ficheiros de sessão.
+
+
+### Origem HTTP atrás do Cloudflare Tunnel
+
+A opção `MCAT_WEB_ALLOW_HTTP_ORIGIN=1` permite servir a segunda instância por HTTP na rede privada para que um conector Cloudflare Tunnel possa alcançá-la. Mantém `MCAT_WEB_COOKIE_SECURE=1` e publica o website apenas através do hostname HTTPS do túnel; os cookies de sessão continuam marcados como Secure. Não uses esta opção para expor a porta 8444 diretamente à Internet. Na regra do túnel, configura a origem como `http://192.168.68.153:8444`. A instância principal na porta 8443 mantém HTTPS.
