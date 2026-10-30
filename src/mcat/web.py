@@ -454,6 +454,8 @@ async def create_job(request: Request):
         if not isinstance(values, list) or any(not isinstance(value, int) or isinstance(value, bool) for value in values):
             raise ValueError("A seleção de opções é inválida.")
         job_id = request.app.state.telegram.create_job(session["username"], search_id, values)
+        if asyncio.iscoroutine(job_id):
+            job_id = await job_id
         return JSONResponse({"job_id": job_id, "status": "queued"}, status_code=202)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
