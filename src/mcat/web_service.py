@@ -151,7 +151,7 @@ class TelegramWebService:
 
     def set_destination(self, entity):
         self.destination = entity
-        self.dedup_chats = [entity]
+        self.dedup_chats = [entity] if entity is not None else []
         self.destination_indexed = False
 
     async def close(self):
