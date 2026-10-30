@@ -1,10 +1,13 @@
 """HTTP interface for authenticated MCat search and forwarding requests."""
 import asyncio
+import base64
 import hashlib
 import hmac
 import ipaddress
 import json
+import logging
 import os
+import re
 import secrets
 import sqlite3
 from contextlib import asynccontextmanager
@@ -19,6 +22,8 @@ from .web_service import TelegramWebService, utc_text
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 SESSION_COOKIE = "mcat_session"
 SESSION_TTL_SECONDS = 8 * 60 * 60
 DB_PATH = Path(os.getenv("DB_PATH", "./data/mcat.sqlite3")).expanduser()
@@ -30,7 +35,12 @@ COOKIE_SECURE = os.getenv("MCAT_WEB_COOKIE_SECURE", "1").strip().casefold() not 
 def _init_auth_database():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(DB_PATH)
+    db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
+    db.execute("""CREATE TABLE IF NOT EXISTS web_users (
+        username TEXT PRIMARY KEY, password_hash TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('admin','user')),
+        is_active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL)""")
     db.execute("""CREATE TABLE IF NOT EXISTS web_sessions (
         token_hash TEXT PRIMARY KEY, username TEXT NOT NULL,
         csrf_token TEXT NOT NULL, expires_at TEXT NOT NULL, created_at TEXT NOT NULL)""")
@@ -38,6 +48,14 @@ def _init_auth_database():
     db.execute("""CREATE TABLE IF NOT EXISTS web_login_attempts (
         client_hash TEXT PRIMARY KEY, failures INTEGER NOT NULL,
         locked_until TEXT NOT NULL)""")
+    user_count = db.execute("SELECT COUNT(*) AS n FROM web_users").fetchone()["n"]
+    if user_count == 0:
+        if not WEB_USERNAME or not WEB_PASSWORD:
+            raise RuntimeError("Configura MCAT_WEB_USERNAME e MCAT_WEB_PASSWORD para criar o primeiro administrador.")
+        db.execute(
+            "INSERT INTO web_users(username,password_hash,role,is_active,created_at) VALUES(?,?,'admin',1,?)",
+            (WEB_USERNAME.casefold(), _hash_password(WEB_PASSWORD), utc_text()),
+        )
     db.commit()
     try:
         os.chmod(DB_PATH, 0o600)
@@ -48,6 +66,28 @@ def _init_auth_database():
 
 def _token_hash(token):
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _hash_password(password):
+    iterations = 310_000
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    salt_text = base64.urlsafe_b64encode(salt).decode("ascii")
+    digest_text = base64.urlsafe_b64encode(digest).decode("ascii")
+    return "pbkdf2_sha256$%d$%s$%s" % (iterations, salt_text, digest_text)
+
+
+def _verify_password(password, encoded):
+    try:
+        algorithm, iterations, salt_text, digest_text = encoded.split("$", 3)
+        if algorithm != "pbkdf2_sha256":
+            return False
+        salt = base64.urlsafe_b64decode(salt_text.encode("ascii"))
+        expected = base64.urlsafe_b64decode(digest_text.encode("ascii"))
+        actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, int(iterations))
+        return hmac.compare_digest(actual, expected)
+    except (ValueError, TypeError, UnicodeError):
+        return False
 
 
 def _now():
@@ -81,17 +121,27 @@ async def _session(request: Request):
         return None
     db = request.app.state.auth_db
     token_digest = _token_hash(token)
-    row = db.execute("SELECT * FROM web_sessions WHERE token_hash=?", (token_digest,)).fetchone()
+    row = db.execute(
+        """SELECT s.username,s.csrf_token,s.expires_at,u.role,u.is_active
+           FROM web_sessions s LEFT JOIN web_users u ON u.username=s.username
+           WHERE s.token_hash=?""",
+        (token_digest,),
+    ).fetchone()
     if not row:
         return None
-    expires = datetime.fromisoformat(row[3])
+    if not row["is_active"]:
+        db.execute("DELETE FROM web_sessions WHERE token_hash=?", (token_digest,))
+        db.commit()
+        return None
+    expires = datetime.fromisoformat(row["expires_at"])
     if expires.tzinfo is None:
         expires = expires.replace(tzinfo=timezone.utc)
     if expires <= _now():
         db.execute("DELETE FROM web_sessions WHERE token_hash=?", (token_digest,))
         db.commit()
         return None
-    return {"username": row[1], "csrf": row[2], "token_hash": token_digest}
+    return {"username": row["username"], "role": row["role"],
+            "csrf": row["csrf_token"], "token_hash": token_digest}
 
 
 async def _require_session(request: Request, csrf=False):
@@ -122,7 +172,8 @@ async def who_am_i(request: Request):
     session = await _session(request)
     if not session:
         return {"authenticated": False}
-    return {"authenticated": True, "username": session["username"], "csrf": session["csrf"]}
+    return {"authenticated": True, "username": session["username"],
+            "role": session["role"], "csrf": session["csrf"]}
 
 
 @app.post("/api/login")
@@ -133,10 +184,8 @@ async def login(request: Request, response: Response):
         raise HTTPException(status_code=400, detail="Pedido inválido.") from exc
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="Pedido inválido.")
-    username = str(body.get("username", "")).strip()
+    username = str(body.get("username", "")).strip().casefold()
     password = str(body.get("password", ""))
-    if not WEB_USERNAME or not WEB_PASSWORD:
-        raise HTTPException(status_code=503, detail="A autenticação web ainda não está configurada no servidor.")
     client_host = request.client.host if request.client else "unknown"
     client_hash = hashlib.sha256(client_host.encode("utf-8")).hexdigest()
     db = request.app.state.auth_db
@@ -144,7 +193,9 @@ async def login(request: Request, response: Response):
                          (client_hash,)).fetchone()
     if attempt and attempt[1] > utc_text():
         raise HTTPException(status_code=429, detail="Demasiadas tentativas. Tenta novamente mais tarde.")
-    if not (hmac.compare_digest(username, WEB_USERNAME) and hmac.compare_digest(password, WEB_PASSWORD)):
+    user = db.execute("SELECT password_hash,is_active FROM web_users WHERE username=?", (username,)).fetchone()
+    valid_password = _verify_password(password, user["password_hash"]) if user else False
+    if not user or not user["is_active"] or not valid_password:
         failures = (attempt[0] if attempt else 0) + 1
         locked_until = utc_text(datetime.now(timezone.utc) + timedelta(minutes=15 if failures >= 8 else 0))
         if failures >= 8:
@@ -164,10 +215,77 @@ async def login(request: Request, response: Response):
     db.execute("INSERT INTO web_sessions(token_hash,username,csrf_token,expires_at,created_at) VALUES(?,?,?,?,?)",
                (_token_hash(token), username, csrf, utc_text(expires), utc_text()))
     db.commit()
-    response = JSONResponse({"authenticated": True, "username": username, "csrf": csrf})
+    response = JSONResponse({"authenticated": True, "username": username,
+                             "role": user["role"], "csrf": csrf})
     response.set_cookie(SESSION_COOKIE, token, max_age=SESSION_TTL_SECONDS, httponly=True,
                         secure=COOKIE_SECURE, samesite="strict", path="/")
     return response
+
+
+@app.post("/api/password")
+async def change_password(request: Request):
+    session = await _require_session(request, csrf=True)
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Pedido inválido.") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Pedido inválido.")
+    current = str(body.get("current_password", ""))
+    new_password = str(body.get("new_password", ""))
+    if len(new_password) < 14:
+        raise HTTPException(status_code=400, detail="A nova palavra-passe deve ter pelo menos 14 caracteres.")
+    db = request.app.state.auth_db
+    row = db.execute("SELECT password_hash FROM web_users WHERE username=? AND is_active=1",
+                     (session["username"],)).fetchone()
+    if not row or not _verify_password(current, row["password_hash"]):
+        raise HTTPException(status_code=400, detail="A palavra-passe atual está incorreta.")
+    if hmac.compare_digest(current, new_password):
+        raise HTTPException(status_code=400, detail="A nova palavra-passe tem de ser diferente.")
+    db.execute("UPDATE web_users SET password_hash=? WHERE username=?",
+               (_hash_password(new_password), session["username"]))
+    db.execute("DELETE FROM web_sessions WHERE username=? AND token_hash<>?",
+               (session["username"], session["token_hash"]))
+    db.commit()
+    return {"changed": True}
+
+
+@app.get("/api/admin/users")
+async def list_users(request: Request):
+    session = await _require_session(request)
+    if session["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Só o administrador pode gerir utilizadores.")
+    rows = request.app.state.auth_db.execute(
+        "SELECT username,role,is_active,created_at FROM web_users ORDER BY username"
+    ).fetchall()
+    return {"users": [dict(row) for row in rows]}
+
+
+@app.post("/api/admin/users")
+async def create_user(request: Request):
+    session = await _require_session(request, csrf=True)
+    if session["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Só o administrador pode criar utilizadores.")
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Pedido inválido.") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Pedido inválido.")
+    username = str(body.get("username", "")).strip().casefold()
+    password = str(body.get("password", ""))
+    if not re.fullmatch(r"[a-z0-9_.-]{3,32}", username):
+        raise HTTPException(status_code=400, detail="O utilizador deve ter 3 a 32 caracteres: letras, números, ponto, hífen ou underscore.")
+    if len(password) < 14:
+        raise HTTPException(status_code=400, detail="A palavra-passe inicial deve ter pelo menos 14 caracteres.")
+    db = request.app.state.auth_db
+    try:
+        db.execute("INSERT INTO web_users(username,password_hash,role,is_active,created_at) VALUES(?,?,'user',1,?)",
+                   (username, _hash_password(password), utc_text()))
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="Esse utilizador já existe.") from exc
+    return {"username": username, "role": "user", "created": True}
 
 
 @app.post("/api/logout")
@@ -198,6 +316,7 @@ async def search(request: Request):
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
+        logger.exception("Web search failed for user %s", session["username"])
         raise HTTPException(status_code=502, detail=f"Não foi possível concluir a pesquisa ({type(exc).__name__}).") from exc
 
 
