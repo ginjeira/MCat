@@ -57,6 +57,27 @@ Preenche:
 
     .venv/bin/python -m mcat
 
+## Interface web (MVP)
+
+A interface web permite autenticar-se, pesquisar por termo, tipo de conteúdo e fornecedor, escolher várias opções da mesma pesquisa e acompanhar o encaminhamento para o destino configurado no servidor. Nesta fase, a sessão Telegram existente e o destino são partilhados pela instalação; autenticação Telegram por utilizador e escolha individual do grupo destino continuam a ser trabalho futuro.
+
+Configura no ficheiro .env, que deve ser legível apenas pelo utilizador do serviço:
+
+    MCAT_WEB_USERNAME=operador
+    MCAT_WEB_PASSWORD=usa-uma-palavra-passe-forte
+    MCAT_WEB_HOST=127.0.0.1
+    MCAT_WEB_PORT=8080
+    MCAT_WEB_COOKIE_SECURE=1
+
+Instala/atualiza as dependências e inicia a interface:
+
+    .venv/bin/pip install -e .
+    .venv/bin/mcat-web
+
+O servidor escuta em 127.0.0.1 por omissão. Para acesso pela rede, coloca-o atrás de um proxy HTTPS e mantém o serviço MCat inacessível diretamente à Internet. MCAT_WEB_COOKIE_SECURE=0 destina-se apenas a desenvolvimento local sem HTTPS.
+
+O serviço web reutiliza a sessão Telegram configurada para o MCat (mcat_user_session por omissão) e o TG_DESTINATION existente. Não executes a interface web e a consola ao mesmo tempo com a mesma sessão. O website não recebe nem guarda códigos Telegram; a autenticação interativa por utilizador e a seleção entre grupos acessíveis ainda não estão implementadas.
+
 Na primeira execução, o Telegram pede autenticação. A sessão local permite reutilizar a conta nas execuções seguintes.
 
 ## Fluxo do primeiro teste
@@ -100,3 +121,4 @@ Na primeira execução, o Telegram pede autenticação. A sessão local permite 
 ## Segurança
 
 O ficheiro de sessão Telegram dá acesso à conta. Protege-o como uma credencial. O repositório ignora .env, sessões, base de dados e ambiente virtual.
+
