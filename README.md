@@ -68,13 +68,15 @@ Configura no ficheiro .env, que deve ser legível apenas pelo utilizador do serv
     MCAT_WEB_HOST=127.0.0.1
     MCAT_WEB_PORT=8080
     MCAT_WEB_COOKIE_SECURE=1
+    MCAT_WEB_SSL_CERTFILE=
+    MCAT_WEB_SSL_KEYFILE=
 
 Instala/atualiza as dependências e inicia a interface:
 
     .venv/bin/pip install -e .
     .venv/bin/mcat-web
 
-O servidor escuta em 127.0.0.1 por omissão. Para acesso pela rede, coloca-o atrás de um proxy HTTPS e mantém o serviço MCat inacessível diretamente à Internet. MCAT_WEB_COOKIE_SECURE=0 destina-se apenas a desenvolvimento local sem HTTPS.
+O servidor escuta em 127.0.0.1 por omissão. Para acesso na rede local, define MCAT_WEB_HOST para o endereço privado do servidor, configura um certificado e uma chave em MCAT_WEB_SSL_CERTFILE e MCAT_WEB_SSL_KEYFILE e usa uma porta HTTPS, por exemplo 8443. O programa recusa escutar num endereço não local sem HTTPS. Para acesso pela Internet, usa um proxy HTTPS adequado e mantém o serviço MCat inacessível diretamente. MCAT_WEB_COOKIE_SECURE=0 destina-se apenas a desenvolvimento local sem HTTPS.
 
 O serviço web reutiliza a sessão Telegram configurada para o MCat (mcat_user_session por omissão) e o TG_DESTINATION existente. Não executes a interface web e a consola ao mesmo tempo com a mesma sessão. O website não recebe nem guarda códigos Telegram; a autenticação interativa por utilizador e a seleção entre grupos acessíveis ainda não estão implementadas.
 
