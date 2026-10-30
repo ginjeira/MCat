@@ -44,6 +44,9 @@
     .account-dropdown button { width: 100%; text-align: left; margin: .15rem 0; }
     .account-dropdown button.secondary { color: #18232f; border-color: #d9e1e8; }
     .account-settings { max-width: 680px; }
+    #telegram-destination-picker { margin-top: 1rem; }
+    .telegram-status { font-weight: 650; }
+    @media (max-width: 620px) { .user-row { grid-template-columns: 1fr; } .user-row form { flex-direction: column; align-items: stretch; } }
     .user-row { display: grid; grid-template-columns: 1fr 2fr; gap: .8rem; align-items: center; padding: .8rem 0; border-top: 1px solid #e2e8ee; }
     .user-row form { display: flex; gap: .5rem; align-items: center; }
     .user-row input { min-width: 0; }
@@ -59,6 +62,7 @@
         <div class="account-dropdown">
           <button id="open-password" type="button">Alterar palavra-passe</button>
           <button id="open-admin" type="button" hidden>Gerir utilizadores</button>
+          <button id="open-telegram" type="button" hidden>Telegram e destino</button>
           <button id="logout" class="secondary" type="button">Terminar sessão</button>
         </div>
       </details>
@@ -155,6 +159,41 @@
           <div id="user-list"></div>
           <div class="actions"><button id="close-settings" type="button" class="secondary">Fechar</button></div>
         </section>
+
+        <section id="telegram-card" class="card" hidden>
+          <h2>Ligação Telegram e destino</h2>
+          <p id="telegram-status" class="muted">A verificar a ligação…</p>
+          <div id="telegram-connected" hidden>
+            <p>Conta Telegram: <strong id="telegram-account-label"></strong></p>
+            <p>Destino atual: <strong id="telegram-destination-label">Ainda não escolhido</strong></p>
+            <div class="actions">
+              <button id="refresh-destinations" type="button">Escolher ou atualizar destino</button>
+              <button id="disconnect-telegram" type="button" class="secondary">Desligar conta Telegram</button>
+            </div>
+          </div>
+          <form id="telegram-phone-form" hidden>
+            <label for="telegram-phone">Número de telefone Telegram, com indicativo do país</label>
+            <input id="telegram-phone" type="tel" autocomplete="tel" placeholder="+351..." required>
+            <div class="actions"><button type="submit">Enviar código</button></div>
+          </form>
+          <form id="telegram-code-form" hidden>
+            <label for="telegram-code">Código recebido no Telegram</label>
+            <input id="telegram-code" inputmode="numeric" autocomplete="one-time-code" required>
+            <div class="actions"><button type="submit">Confirmar código</button></div>
+          </form>
+          <form id="telegram-two-step-form" hidden>
+            <label for="telegram-two-step-password">Palavra-passe de verificação em dois passos</label>
+            <input id="telegram-two-step-password" type="password" autocomplete="current-password" required>
+            <div class="actions"><button type="submit">Confirmar palavra-passe</button></div>
+          </form>
+          <div id="telegram-destination-picker" hidden>
+            <label for="telegram-destination-select">Grupo ou canal destino</label>
+            <select id="telegram-destination-select"></select>
+            <div class="actions"><button id="save-telegram-destination" type="button">Confirmar destino</button></div>
+          </div>
+          <div id="telegram-message" class="notice" role="status" hidden></div>
+          <div class="actions"><button id="close-settings" type="button" class="secondary">Fechar</button></div>
+        </section>
       </section>
     </div>
   </main>
@@ -162,6 +201,8 @@
   <script>
     let csrfToken = "";
     let currentSearch = null;
+    let telegramSupported = false;
+    let currentTelegramDestination = null;
     const $ = (id) => document.getElementById(id);
 
     function showMessage(element, text, kind) {
@@ -203,7 +244,8 @@
     }
 
     function updateSelectionButton() {
-      $("submit-selection").disabled = !currentSearch || !$("results").querySelector("input:checked");
+      $("submit-selection").disabled = !currentSearch || !$("results").querySelector("input:checked") ||
+        (telegramSupported && !currentTelegramDestination);
     }
 
     function setAccount(user) {
@@ -216,8 +258,10 @@
       $("account-settings").hidden = false;
       $("password-card").hidden = panelId !== "password-card";
       $("admin-users-card").hidden = panelId !== "admin-users-card";
+      $("telegram-card").hidden = panelId !== "telegram-card";
       $("account-menu").open = false;
       if (panelId === "admin-users-card") loadAdminUsers();
+      if (panelId === "telegram-card") loadTelegramState();
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
@@ -321,6 +365,7 @@
           $("app").hidden = false;
           setAccount(me);
           await refreshJobs();
+          await loadTelegramState();
           window.setInterval(refreshJobs, 3000);
         } else {
           $("login-card").hidden = false;
@@ -346,14 +391,146 @@
         $("app").hidden = false;
         setAccount(data);
         await refreshJobs();
+        await loadTelegramState();
         window.setInterval(refreshJobs, 3000);
       } catch (error) {
         showMessage($("login-error"), error.message, "error");
       }
     });
 
+    async function loadTelegramState() {
+      try {
+        const state = await api("/api/telegram/status");
+        telegramSupported = !!state.supported;
+        $("open-telegram").hidden = !telegramSupported;
+        if (!telegramSupported) return;
+        $("telegram-status").textContent = state.connected
+          ? (state.ready ? "A conta Telegram está ligada." : "A sessão precisa de ser reautenticada para voltar a usar o Telegram.")
+          : "Liga uma conta Telegram para pesquisar e escolher o grupo de destino.";
+        $("telegram-connected").hidden = !state.connected;
+        $("telegram-phone-form").hidden = state.ready;
+        $("telegram-account-label").textContent = state.phone_hint || ("ID " + state.telegram_user_id);
+        currentTelegramDestination = state.destination && state.destination.available ? state.destination : null;
+        $("telegram-destination-label").textContent = currentTelegramDestination
+          ? currentTelegramDestination.title : "Ainda não escolhido";
+        if (state.ready) await refreshTelegramDestinations();
+        else $("telegram-destination-picker").hidden = true;
+        updateSelectionButton();
+      } catch (error) {
+        showMessage($("telegram-message"), error.message, "error");
+      }
+    }
+
+    async function refreshTelegramDestinations() {
+      try {
+        const data = await api("/api/telegram/destinations");
+        const select = $("telegram-destination-select");
+        select.replaceChildren();
+        for (const destination of data.destinations) {
+          const option = document.createElement("option");
+          option.value = String(destination.id);
+          option.textContent = destination.title + " · " + destination.kind + " · " + destination.detail;
+          if (currentTelegramDestination && destination.id === currentTelegramDestination.id) option.selected = true;
+          select.append(option);
+        }
+        $("telegram-destination-picker").hidden = false;
+        if (!data.destinations.length) {
+          showMessage($("telegram-message"), "Não encontrei grupos onde esta conta possa encaminhar mensagens.", "error");
+        } else {
+          showMessage($("telegram-message"), "", "");
+        }
+      } catch (error) {
+        showMessage($("telegram-message"), error.message, "error");
+      }
+    }
+
+    $("telegram-phone-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      showMessage($("telegram-message"), "A solicitar código ao Telegram…", "");
+      try {
+        const data = await api("/api/telegram/send-code", { method: "POST", body: JSON.stringify({ phone: $("telegram-phone").value }) });
+        $("telegram-phone-form").hidden = true;
+        $("telegram-code-form").hidden = false;
+        $("telegram-code").focus();
+        showMessage($("telegram-message"), "Código enviado para a conta " + data.phone_hint + ".", "success");
+      } catch (error) {
+        showMessage($("telegram-message"), error.message, "error");
+      }
+    });
+
+    $("telegram-code-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const data = await api("/api/telegram/verify-code", { method: "POST", body: JSON.stringify({ code: $("telegram-code").value }) });
+        $("telegram-code").value = "";
+        if (data.password_required) {
+          $("telegram-code-form").hidden = true;
+          $("telegram-two-step-form").hidden = false;
+          $("telegram-two-step-password").focus();
+          showMessage($("telegram-message"), "A conta exige a palavra-passe de verificação em dois passos.", "");
+          return;
+        }
+        $("telegram-code-form").hidden = true;
+        await loadTelegramState();
+        await refreshTelegramDestinations();
+        showMessage($("telegram-message"), "Conta Telegram ligada. Escolhe o destino.", "success");
+      } catch (error) {
+        showMessage($("telegram-message"), error.message, "error");
+      }
+    });
+
+    $("telegram-two-step-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        await api("/api/telegram/verify-password", { method: "POST", body: JSON.stringify({ password: $("telegram-two-step-password").value }) });
+        $("telegram-two-step-password").value = "";
+        $("telegram-two-step-form").hidden = true;
+        await loadTelegramState();
+        await refreshTelegramDestinations();
+        showMessage($("telegram-message"), "Conta Telegram ligada. Escolhe o destino.", "success");
+      } catch (error) {
+        $("telegram-two-step-password").value = "";
+        showMessage($("telegram-message"), error.message, "error");
+      }
+    });
+
+    $("refresh-destinations").addEventListener("click", refreshTelegramDestinations);
+    $("save-telegram-destination").addEventListener("click", async () => {
+      const choice = $("telegram-destination-select").selectedOptions[0];
+      if (!choice) return;
+      const title = choice.textContent;
+      if (!window.confirm("Confirmas " + title + " como destino predefinido dos teus pedidos?")) return;
+      try {
+        const result = await api("/api/telegram/destination", {
+          method: "POST", body: JSON.stringify({ chat_id: choice.value })
+        });
+        currentTelegramDestination = result;
+        $("telegram-destination-label").textContent = result.title;
+        $("telegram-destination-picker").hidden = true;
+        showMessage($("telegram-message"), "Destino guardado: " + result.title + ".", "success");
+        updateSelectionButton();
+      } catch (error) {
+        showMessage($("telegram-message"), error.message, "error");
+      }
+    });
+
+    $("disconnect-telegram").addEventListener("click", async () => {
+      if (!window.confirm("Desligar esta conta Telegram e remover a sessão guardada?")) return;
+      try {
+        await api("/api/telegram/disconnect", { method: "POST", body: "{}" });
+        currentTelegramDestination = null;
+        $("telegram-destination-picker").hidden = true;
+        await loadTelegramState();
+        showMessage($("telegram-message"), "Conta Telegram desligada.", "success");
+        updateSelectionButton();
+      } catch (error) {
+        showMessage($("telegram-message"), error.message, "error");
+      }
+    });
+
     $("open-password").addEventListener("click", () => showAccountPanel("password-card"));
     $("open-admin").addEventListener("click", () => showAccountPanel("admin-users-card"));
+    $("open-telegram").addEventListener("click", () => showAccountPanel("telegram-card"));
     document.querySelectorAll("#close-settings").forEach((button) => button.addEventListener("click", () => {
       $("account-settings").hidden = true;
     }));
@@ -428,7 +605,8 @@
       event.preventDefault();
       const numbers = Array.from($("results").querySelectorAll("input:checked")).map((item) => Number(item.value));
       if (!currentSearch || !numbers.length) return;
-      if (!window.confirm("Confirmas o processamento e encaminhamento de " + numbers.length + " opção(ões) para o destino configurado?")) return;
+      const targetLabel = currentTelegramDestination ? " para " + currentTelegramDestination.title : " para o destino configurado";
+      if (!window.confirm("Confirmas o processamento e encaminhamento de " + numbers.length + " opção(ões)" + targetLabel + "?")) return;
       $("submit-selection").disabled = true;
       try {
         const result = await api("/api/jobs", { method: "POST", body: JSON.stringify({

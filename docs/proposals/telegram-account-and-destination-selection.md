@@ -1,6 +1,6 @@
 # Ligação futura da conta Telegram e escolha do grupo destino
 
-**Estado:** capacidade futura; não faz parte do comportamento atual.
+**Estado:** implementação em curso na branch `feature/telegram-account-destination`; a instância partilhada em 8443 continua a ser a versão principal.
 
 Este documento especifica a ligação interativa de uma conta Telegram ao website do MCat e a escolha de um grupo destino entre os grupos acessíveis a essa conta.
 
@@ -50,6 +50,16 @@ A estratégia técnica de armazenamento e cifragem deve ser decidida antes da im
 - Revalidar o acesso ao destino quando a conta ou as permissões mudarem.
 - Se o destino deixar de estar acessível, suspender os novos encaminhamentos para esse utilizador e apresentar uma ação para escolher outro destino.
 - Mostrar o destino escolhido antes da confirmação de cada pedido que possa encaminhar conteúdos.
+
+## Decisões adotadas para esta implementação
+
+- Cada conta web pode ligar uma conta Telegram de cada vez.
+- Cada conta Telegram tem um destino predefinido; pode ser alterado nas definições da conta.
+- A segunda instância mantém uma porta, cookie, base de dados operacional e sessão independentes da instância partilhada.
+- As contas web e as palavras-passe são partilhadas entre as duas instâncias durante a coexistência.
+- O código e a palavra-passe de dois passos existem apenas no fluxo temporário de autenticação.
+- A sessão é serializada como Telethon StringSession e cifrada com Fernet antes de ser guardada na base de dados. A chave de cifragem é fornecida fora do repositório; a perda da chave invalida a capacidade de abrir sessões existentes.
+- Os pedidos validam novamente o acesso ao destino antes de serem aceites. Se o destino já não puder ser usado, o utilizador tem de escolher outro.
 
 ## Dependências e decisões anteriores à implementação
 

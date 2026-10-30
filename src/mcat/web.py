@@ -24,17 +24,18 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-SESSION_COOKIE = "mcat_session"
+SESSION_COOKIE = os.getenv("MCAT_WEB_SESSION_COOKIE", "mcat_session").strip()
 SESSION_TTL_SECONDS = 8 * 60 * 60
 DB_PATH = Path(os.getenv("DB_PATH", "./data/mcat.sqlite3")).expanduser()
+AUTH_DB_PATH = Path(os.getenv("MCAT_WEB_AUTH_DB_PATH", str(DB_PATH))).expanduser()
 WEB_USERNAME = os.getenv("MCAT_WEB_USERNAME", "").strip()
 WEB_PASSWORD = os.getenv("MCAT_WEB_PASSWORD", "")
 COOKIE_SECURE = os.getenv("MCAT_WEB_COOKIE_SECURE", "1").strip().casefold() not in ("0", "false", "no")
 
 
 def _init_auth_database():
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(DB_PATH)
+    AUTH_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    db = sqlite3.connect(AUTH_DB_PATH)
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("""CREATE TABLE IF NOT EXISTS web_users (
@@ -58,7 +59,7 @@ def _init_auth_database():
         )
     db.commit()
     try:
-        os.chmod(DB_PATH, 0o600)
+        os.chmod(AUTH_DB_PATH, 0o600)
     except OSError:
         pass
     return db
@@ -97,17 +98,24 @@ def _now():
 @asynccontextmanager
 async def lifespan(app):
     app.state.auth_db = _init_auth_database()
-    app.state.telegram = TelegramWebService()
-    await app.state.telegram.connect()
-    app.state.worker_task = asyncio.create_task(app.state.telegram.worker())
+    if os.getenv("MCAT_WEB_TG_MODE", "shared").strip().casefold() == "per_user":
+        from .telegram_accounts import UserTelegramManager
+        app.state.telegram = UserTelegramManager(DB_PATH)
+        await app.state.telegram.connect()
+        app.state.worker_task = None
+    else:
+        app.state.telegram = TelegramWebService()
+        await app.state.telegram.connect()
+        app.state.worker_task = asyncio.create_task(app.state.telegram.worker())
     try:
         yield
     finally:
-        app.state.worker_task.cancel()
-        try:
-            await app.state.worker_task
-        except asyncio.CancelledError:
-            pass
+        if app.state.worker_task:
+            app.state.worker_task.cancel()
+            try:
+                await app.state.worker_task
+            except asyncio.CancelledError:
+                pass
         await app.state.telegram.close()
         app.state.auth_db.close()
 
@@ -174,6 +182,101 @@ async def who_am_i(request: Request):
         return {"authenticated": False}
     return {"authenticated": True, "username": session["username"],
             "role": session["role"], "csrf": session["csrf"]}
+
+
+def _telegram_manager(request):
+    manager = request.app.state.telegram
+    if not hasattr(manager, "get_telegram_state"):
+        raise HTTPException(status_code=404, detail="A ligação individual Telegram não está ativa nesta versão.")
+    return manager
+
+
+async def _telegram_request_body(request):
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Pedido inválido.") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Pedido inválido.")
+    return body
+
+
+@app.get("/api/telegram/status")
+async def telegram_status(request: Request):
+    session = await _require_session(request)
+    manager = request.app.state.telegram
+    if not hasattr(manager, "get_telegram_state"):
+        return {"supported": False, "connected": False, "destination": None}
+    return manager.get_telegram_state(session["username"])
+
+
+@app.post("/api/telegram/send-code")
+async def telegram_send_code(request: Request):
+    session = await _require_session(request, csrf=True)
+    body = await _telegram_request_body(request)
+    try:
+        return await _telegram_manager(request).send_code(session["username"], body.get("phone", ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/telegram/verify-code")
+async def telegram_verify_code(request: Request):
+    session = await _require_session(request, csrf=True)
+    body = await _telegram_request_body(request)
+    try:
+        return await _telegram_manager(request).verify_code(session["username"], body.get("code", ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/telegram/verify-password")
+async def telegram_verify_password(request: Request):
+    session = await _require_session(request, csrf=True)
+    body = await _telegram_request_body(request)
+    try:
+        return await _telegram_manager(request).verify_password(session["username"], body.get("password", ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/telegram/destinations")
+async def telegram_destinations(request: Request):
+    session = await _require_session(request)
+    try:
+        destinations = await _telegram_manager(request).list_destinations(session["username"])
+        return {"destinations": destinations}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/telegram/destination")
+async def telegram_select_destination(request: Request):
+    session = await _require_session(request, csrf=True)
+    body = await _telegram_request_body(request)
+    try:
+        return await _telegram_manager(request).select_destination(session["username"], body.get("chat_id"))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/telegram/disconnect")
+async def telegram_disconnect(request: Request):
+    session = await _require_session(request, csrf=True)
+    try:
+        return await _telegram_manager(request).disconnect_account(session["username"])
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.post("/api/login")
@@ -351,6 +454,8 @@ async def create_job(request: Request):
         if not isinstance(values, list) or any(not isinstance(value, int) or isinstance(value, bool) for value in values):
             raise ValueError("A seleção de opções é inválida.")
         job_id = request.app.state.telegram.create_job(session["username"], search_id, values)
+        if asyncio.iscoroutine(job_id):
+            job_id = await job_id
         return JSONResponse({"job_id": job_id, "status": "queued"}, status_code=202)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -385,8 +490,9 @@ def run():
         loopback_only = ipaddress.ip_address(host).is_loopback
     except ValueError:
         loopback_only = host.casefold() == "localhost"
-    if not loopback_only and not (certfile and keyfile):
-        raise SystemExit("O acesso fora do próprio servidor exige um certificado HTTPS.")
+    allow_http_origin = os.getenv("MCAT_WEB_ALLOW_HTTP_ORIGIN", "0").strip().casefold() in ("1", "true", "yes")
+    if not loopback_only and not (certfile and keyfile) and not allow_http_origin:
+        raise SystemExit("O acesso fora do próprio servidor exige HTTPS. Para uma origem atrás de túnel privado, define explicitamente MCAT_WEB_ALLOW_HTTP_ORIGIN=1.")
     uvicorn.run("mcat.web:app", host=host, port=port, proxy_headers=False,
                 ssl_certfile=certfile, ssl_keyfile=keyfile)
 
