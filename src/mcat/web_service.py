@@ -114,6 +114,16 @@ class TelegramWebService:
                     self.destination = await self.client.get_entity(self.destination_ref)
                 except Exception:
                     self.destination = None
+                    # Telethon expects a cached channel entity, not the Bot API
+                    # style "-100..." channel id. Resolve configured numeric IDs
+                    # against the account's dialogs, which also verifies access.
+                    ref = self.destination_ref
+                    if re.fullmatch(r"-?\\d+", ref):
+                        target_id = int(ref[4:] if ref.startswith("-100") else ref.lstrip("-"))
+                        async for dialog in self.client.iter_dialogs():
+                            if getattr(dialog.entity, "id", None) == target_id:
+                                self.destination = dialog.entity
+                                break
             self.dedup_chats = []
             if self.destination is not None:
                 self.dedup_chats.append(self.destination)
