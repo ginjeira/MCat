@@ -72,7 +72,7 @@ class UserTelegramManager:
                 session_string = self.cipher.decrypt(row["session_ciphertext"]).decode("ascii")
             except (InvalidToken, UnicodeError) as exc:
                 raise RuntimeError("Não foi possível desbloquear uma sessão Telegram guardada.") from exc
-            service = await self._make_service(session_string)
+            service = await self._make_service(session_string, row["username"])
             if row["destination_id"] is not None:
                 dialogs = await self._eligible_dialogs(service)
                 match = next((entity for entity, _ in dialogs
@@ -102,8 +102,8 @@ class UserTelegramManager:
         self.pending.clear()
         self.db.close()
 
-    async def _make_service(self, session_string):
-        service = TelegramWebService(session_string=session_string, per_user=True)
+    async def _make_service(self, session_string, username):
+        service = TelegramWebService(session_string=session_string, per_user=True, web_username=username)
         await service.connect()
         return service
 
@@ -213,7 +213,7 @@ class UserTelegramManager:
         session_string = client.session.save()
         await client.disconnect()
         ciphertext = self.cipher.encrypt(session_string.encode("ascii"))
-        service = await self._make_service(session_string)
+        service = await self._make_service(session_string, username)
         self.db.execute("""
           INSERT INTO web_telegram_accounts
             (username,telegram_user_id,phone_hint,session_ciphertext,connected_at)
