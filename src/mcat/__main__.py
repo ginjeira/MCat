@@ -6,7 +6,7 @@ import shlex
 import sqlite3
 import unicodedata
 
-from .playlist_engine import add_media, active_playlist, audio_metadata, destination_has_media, duplicate_groups, finish_playlist, index_destination_media, init_playlist_schema, interrupt_active_playlist, interrupt_stale_playlists, is_finished, is_playlist_start, media_document_id, playlist_delivery_summary, start_playlist
+from .playlist_engine import MAINTENANCE_COOLDOWN_SECONDS, add_media, active_playlist, audio_metadata, destination_has_media, duplicate_groups, finish_playlist, index_destination_media, init_playlist_schema, interrupt_active_playlist, interrupt_stale_playlists, is_finished, is_maintenance_notice, is_playlist_start, maintenance_cooldown_remaining, media_document_id, playlist_delivery_summary, set_maintenance_cooldown, start_playlist
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -180,6 +180,9 @@ def print_status():
     duplicates = db.execute("SELECT COUNT(*) n FROM observations WHERE duplicate_of IS NOT NULL").fetchone()["n"]
     errors = db.execute("SELECT COUNT(*) n FROM observations WHERE error IS NOT NULL").fetchone()["n"]
     print(f"Mensagens observadas: {total} | com media: {media} | encaminhadas: {forwarded} | possíveis duplicados de texto: {duplicates} | erros: {errors}")
+    remaining = maintenance_cooldown_remaining(db)
+    if remaining:
+        print(f"Pedidos suspensos por manutenção: cerca de {(remaining + 59) // 60} min restantes.")
 
 
 def export_csv(path):
@@ -357,6 +360,16 @@ async def main():
         global auto_playlist_stage, auto_choice_number, auto_min_message_id
         message = event.message
         text = message.message or ""
+
+        if is_maintenance_notice(text):
+            until = set_maintenance_cooldown(db)
+            save_observation(message)
+            disarm_search_state(interrupt_active=True)
+            print(
+                f"\n[MAINTENANCE] Aviso do bot detetado; novas pesquisas suspensas por "
+                f"{MAINTENANCE_COOLDOWN_SECONDS // 60} minutos (até {until.strftime('%H:%M UTC')})."
+            )
+            return
 
         if active_search_generation is not None and message.id > auto_min_message_id:
             refresh_search_timeout(active_search_generation)
@@ -599,6 +612,8 @@ async def main():
             break
         if command == "/help":
             print("""/search <termo> [n] pesquisa e seleciona automaticamente Playlist e a opção n (por omissão 1)
+/search é suspenso por 30 minutos quando o bot informa que está em manutenção
+/maintenance-pause suspende pesquisas por 30 minutos após aviso de manutenção
 /live-test <limite> arma uma única pesquisa em modo real, limitada a esse número de músicas novas encaminhadas
 /hist-music-find <termo> pesquisa título/intérprete nos históricos (só leitura)
 /hist-music-find <termo> pesquisa título/intérprete nos históricos (só leitura)
@@ -628,6 +643,13 @@ async def main():
             current_query = " ".join(query_parts).strip()
             if not current_query:
                 print("Uso: /search <termo> [número_da_opção]")
+                continue
+            maintenance_remaining = maintenance_cooldown_remaining(db)
+            if maintenance_remaining:
+                print(
+                    f"[SEARCH] Pedido não enviado: o bot está em pausa de manutenção; "
+                    f"tenta novamente dentro de cerca de {(maintenance_remaining + 59) // 60} min."
+                )
                 continue
             if active_playlist(db, bot_entity.id) is not None:
                 print("Já existe uma playlist em recolha; a nova pesquisa foi recusada para evitar misturar resultados.")
@@ -670,12 +692,26 @@ async def main():
             if len(args) != 1 or not args[0].isdigit() or int(args[0]) < 1:
                 print("Uso: /live-test <limite>; exemplo: /live-test 3. Depois executa /search <termo> [n].")
                 continue
+            maintenance_remaining = maintenance_cooldown_remaining(db)
+            if maintenance_remaining:
+                print(
+                    f"[LIVE-TEST] Não armado: o bot está em pausa de manutenção; "
+                    f"tenta novamente dentro de cerca de {(maintenance_remaining + 59) // 60} min."
+                )
+                continue
             if destination_entity is None:
                 print("Destino não resolvido; verifica TG_DESTINATION.")
                 continue
             live_test_limit = int(args[0])
             live_test_armed = True
             print(f"[LIVE-TEST] Próxima pesquisa autorizada em modo real, com limite de {live_test_limit} músicas novas encaminhadas. Executa /search <termo> [n].")
+        elif command == "/maintenance-pause":
+            until = set_maintenance_cooldown(db)
+            disarm_search_state(interrupt_active=True)
+            print(
+                f"[MAINTENANCE] Pesquisas suspensas por {MAINTENANCE_COOLDOWN_SECONDS // 60} "
+                f"minutos (até {until.strftime('%H:%M UTC')}); pedidos durante a pausa não serão enviados."
+            )
         elif command == "/tag":
             current_label = "-".join(norm(" ".join(args)).split()) if args else "sem-etiqueta"
             print(f"Etiqueta atual: {current_label}")
@@ -960,4 +996,5 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
+
 
