@@ -115,6 +115,7 @@ def playlist_delivery_summary(db, playlist_id):
         "new": new,
         "forwarded": forwarded,
         "dry_run": counts.get("dry_run", 0),
+        "limit_reached": counts.get("limit_reached", 0),
         "missing": counts.get("missing", 0),
         "errors": counts.get("error", 0),
     }
