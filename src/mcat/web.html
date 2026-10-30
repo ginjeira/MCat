@@ -405,10 +405,10 @@
         $("open-telegram").hidden = !telegramSupported;
         if (!telegramSupported) return;
         $("telegram-status").textContent = state.connected
-          ? "A conta Telegram está ligada."
+          ? (state.ready ? "A conta Telegram está ligada." : "A sessão precisa de ser reautenticada para voltar a usar o Telegram.")
           : "Liga uma conta Telegram para pesquisar e escolher o grupo de destino.";
         $("telegram-connected").hidden = !state.connected;
-        $("telegram-phone-form").hidden = state.connected;
+        $("telegram-phone-form").hidden = state.ready;
         $("telegram-account-label").textContent = state.phone_hint || ("ID " + state.telegram_user_id);
         currentTelegramDestination = state.destination && state.destination.available ? state.destination : null;
         $("telegram-destination-label").textContent = currentTelegramDestination
