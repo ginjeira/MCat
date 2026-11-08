@@ -33,6 +33,15 @@ WEB_PASSWORD = os.getenv("MCAT_WEB_PASSWORD", "")
 COOKIE_SECURE = os.getenv("MCAT_WEB_COOKIE_SECURE", "1").strip().casefold() not in ("0", "false", "no")
 
 
+def _secure_cookie_for_request(request):
+    """Use Secure for HTTPS clients, including clients behind an HTTPS proxy."""
+    if not COOKIE_SECURE:
+        return False
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().casefold()
+    scheme = forwarded_proto or request.url.scheme
+    return scheme == "https"
+
+
 def _init_auth_database():
     AUTH_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     db = sqlite3.connect(AUTH_DB_PATH)
@@ -321,7 +330,7 @@ async def login(request: Request, response: Response):
     response = JSONResponse({"authenticated": True, "username": username,
                              "role": user["role"], "csrf": csrf})
     response.set_cookie(SESSION_COOKIE, token, max_age=SESSION_TTL_SECONDS, httponly=True,
-                        secure=COOKIE_SECURE, samesite="strict", path="/")
+                        secure=_secure_cookie_for_request(request), samesite="strict", path="/")
     return response
 
 
@@ -416,7 +425,7 @@ async def logout(request: Request):
     request.app.state.auth_db.execute("DELETE FROM web_sessions WHERE token_hash=?", (session["token_hash"],))
     request.app.state.auth_db.commit()
     response = JSONResponse({"authenticated": False})
-    response.delete_cookie(SESSION_COOKIE, path="/", secure=COOKIE_SECURE, httponly=True, samesite="strict")
+    response.delete_cookie(SESSION_COOKIE, path="/", secure=_secure_cookie_for_request(request), httponly=True, samesite="strict")
     return response
 
 
