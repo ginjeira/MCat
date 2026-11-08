@@ -255,9 +255,16 @@ async def list_users(request: Request):
     session = await _require_session(request)
     if session["role"] != "admin":
         raise HTTPException(status_code=403, detail="Só o administrador pode gerir utilizadores.")
-    rows = request.app.state.auth_db.execute(
-        "SELECT username,role,is_active,created_at FROM web_users ORDER BY username"
-    ).fetchall()
+    try:
+        rows = request.app.state.auth_db.execute(
+            "SELECT username,role,is_active,created_at FROM web_users ORDER BY username"
+        ).fetchall()
+    except sqlite3.Error as exc:
+        logger.exception("Admin user list failed for %s", session["username"])
+        raise HTTPException(
+            status_code=500,
+            detail="Não foi possível consultar a lista de utilizadores. Verifica os registos do serviço MCat.",
+        ) from exc
     return {"users": [dict(row) for row in rows]}
 
 

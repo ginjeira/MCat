@@ -175,9 +175,20 @@
       options.headers = Object.assign({ "Content-Type": "application/json" }, options.headers || {});
       if (options.method && options.method !== "GET" && csrfToken) options.headers["X-CSRF-Token"] = csrfToken;
       const response = await fetch(path, Object.assign({ credentials: "same-origin" }, options));
+      const responseText = await response.text();
       let data = {};
-      try { data = await response.json(); } catch (_) {}
-      if (!response.ok) throw new Error(data.detail || "O pedido não foi concluído.");
+      if (responseText) {
+        try { data = JSON.parse(responseText); } catch (_) {}
+      }
+      if (!response.ok) {
+        const detail = data && typeof data.detail === "string" ? data.detail : "";
+        const message = detail || ("O servidor respondeu com erro HTTP " + response.status +
+          (response.statusText ? " (" + response.statusText + ")." : "."));
+        throw new Error(message);
+      }
+      if (responseText && (!data || typeof data !== "object")) {
+        throw new Error("O servidor devolveu uma resposta inválida.");
+      }
       return data;
     }
 
@@ -222,11 +233,22 @@
     }
 
     async function loadAdminUsers() {
-      if ($("admin-users-card").hidden) return;
+      const root = $("user-list");
+      root.replaceChildren();
+      showMessage($("user-message"), "A carregar utilizadores…", "");
       try {
         const data = await api("/api/admin/users");
-        const root = $("user-list");
-        root.replaceChildren();
+        if (!Array.isArray(data.users)) {
+          throw new Error("A resposta do servidor não contém uma lista de utilizadores válida.");
+        }
+        showMessage($("user-message"), "", "");
+        if (data.users.length === 0) {
+          const empty = document.createElement("p");
+          empty.className = "muted";
+          empty.textContent = "Ainda não existem utilizadores registados.";
+          root.append(empty);
+          return;
+        }
         for (const user of data.users) {
           const line = document.createElement("div");
           line.className = "user-row";
@@ -262,7 +284,8 @@
           root.append(line);
         }
       } catch (error) {
-        showMessage($("user-message"), error.message, "error");
+        root.replaceChildren();
+        showMessage($("user-message"), error.message || "Não foi possível carregar os utilizadores.", "error");
       }
     }
 
