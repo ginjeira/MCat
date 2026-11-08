@@ -126,3 +126,26 @@ Na primeira execução, o Telegram pede autenticação. A sessão local permite 
 
 O ficheiro de sessão Telegram dá acesso à conta. Protege-o como uma credencial. O repositório ignora .env, sessões, base de dados e ambiente virtual.
 
+## Instância com conta Telegram individual
+
+A branch `feature/telegram-account-destination` prepara uma segunda instância web. A versão partilhada continua na porta 8443; a nova instância usa a porta 8444, cookie, base de dados de pedidos e sessões Telegram separados. Ambas podem usar as mesmas contas web através de `MCAT_WEB_AUTH_DB_PATH`.
+
+Cada utilizador liga uma conta Telegram com o número, o código recebido e, quando solicitado, a palavra-passe de verificação em dois passos. O código e a palavra-passe só existem durante o fluxo. A sessão resultante é guardada como StringSession cifrada com Fernet em `web_telegram_accounts`; a chave `MCAT_WEB_TG_ENCRYPTION_KEY` é um segredo obrigatório, deve ter permissões restritas e precisa de cópia de segurança. Sem essa chave, as sessões guardadas não podem ser abertas.
+
+A conta ligada escolhe um grupo/canal acessível como destino predefinido. O MCat confirma novamente que o destino continua acessível antes de aceitar cada pedido. Não há fallback para o destino de outro utilizador. A ligação pode ser desligada nas definições da conta, desde que não haja pedidos em curso.
+
+Para preparar uma instalação separada:
+
+1. Clona esta branch para um diretório próprio e cria um ambiente virtual Python.
+2. Instala o projeto com `.venv/bin/pip install -e .`.
+3. Cria o ficheiro privado `.env` a partir de `deploy/mcat-web-per-user.env.example`. Preenche `TG_API_ID`, `TG_API_HASH`, `TG_BOT_USERNAME`, o caminho `MCAT_WEB_AUTH_DB_PATH` para a base de autenticação já existente, os certificados HTTPS e uma chave Fernet nova.
+4. Gera a chave sem a imprimir nos registos do serviço: `.venv/bin/python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Guarda-a diretamente no ficheiro protegido e numa cópia de segurança protegida.
+5. Instala `deploy/mcat-web-per-user.service` em systemd e ajusta `WorkingDirectory`, `EnvironmentFile` e `ExecStart` ao diretório da nova instalação.
+6. Inicia `mcat-web-per-user.service` e acede por HTTPS na porta 8444.
+
+Mantém `DB_PATH` exclusivo da nova instância. Usa o mesmo `MCAT_WEB_AUTH_DB_PATH` para não criar outra base de utilizadores. Nunca partilhes o ficheiro `.env`, a chave Fernet, os códigos Telegram ou os ficheiros de sessão.
+
+
+### Origem HTTP atrás do Cloudflare Tunnel
+
+A opção `MCAT_WEB_ALLOW_HTTP_ORIGIN=1` permite servir a segunda instância por HTTP na rede privada para que um conector Cloudflare Tunnel possa alcançá-la. Mantém `MCAT_WEB_COOKIE_SECURE=1` e publica o website apenas através do hostname HTTPS do túnel; os cookies de sessão continuam marcados como Secure. Não uses esta opção para expor a porta 8444 diretamente à Internet. Na regra do túnel, configura a origem como `http://192.168.68.153:8444`. A instância principal na porta 8443 mantém HTTPS.

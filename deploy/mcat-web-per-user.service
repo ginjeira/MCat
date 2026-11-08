@@ -1,0 +1,21 @@
+[Unit]
+Description=MCat per-user Telegram web interface
+After=network-online.target mcat-web.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/MCat-next
+EnvironmentFile=/root/MCat-next/.env
+UMask=0077
+ExecStart=/root/MCat-next/.venv/bin/mcat-web
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

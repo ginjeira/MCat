@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Telegram playlist catalog and message-forwarding proof of concept"
 requires-python = ">=3.10"
 dependencies = [
+  "cryptography>=42,<47",
   "fastapi>=0.115,<1.0",
   "Telethon>=1.36,<2.0",
   "python-dotenv>=1.0,<2.0",
