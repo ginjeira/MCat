@@ -233,7 +233,6 @@
     }
 
     async function loadAdminUsers() {
-      if ($("admin-users-card").hidden) return;
       const root = $("user-list");
       root.replaceChildren();
       showMessage($("user-message"), "A carregar utilizadores…", "");
