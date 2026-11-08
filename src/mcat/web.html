@@ -268,7 +268,7 @@
     async function loadAdminUsers() {
       if ($("admin-users-card").hidden) return;
       try {
-        const data = await api("/api/admin/users");
+        const data = await api("/api/accounts");
         const root = $("user-list");
         root.replaceChildren();
         for (const user of data.users) {
@@ -292,7 +292,7 @@
             form.addEventListener("submit", async (event) => {
               event.preventDefault();
               try {
-                await api("/api/admin/users/" + encodeURIComponent(user.username) + "/password", {
+                await api("/api/accounts/" + encodeURIComponent(user.username) + "/password", {
                   method: "POST", body: JSON.stringify({ password: password.value })
                 });
                 form.reset();
@@ -565,7 +565,7 @@
       event.preventDefault();
       showMessage($("user-message"), "", "");
       try {
-        const result = await api("/api/admin/users", { method: "POST", body: JSON.stringify({
+        const result = await api("/api/accounts", { method: "POST", body: JSON.stringify({
           username: $("new-username").value.trim(),
           password: $("new-user-password").value
         }) });
