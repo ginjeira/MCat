@@ -362,7 +362,7 @@ async def change_password(request: Request):
     return {"changed": True}
 
 
-@app.get("/api/admin/users")
+@app.get("/api/accounts")
 async def list_users(request: Request):
     session = await _require_session(request)
     if session["role"] != "admin":
@@ -373,7 +373,7 @@ async def list_users(request: Request):
     return {"users": [dict(row) for row in rows]}
 
 
-@app.post("/api/admin/users")
+@app.post("/api/accounts")
 async def create_user(request: Request):
     session = await _require_session(request, csrf=True)
     if session["role"] != "admin":
@@ -400,7 +400,7 @@ async def create_user(request: Request):
     return {"username": username, "role": "user", "created": True}
 
 
-@app.post("/api/admin/users/{username}/password")
+@app.post("/api/accounts/{username}/password")
 async def set_user_password(username: str, request: Request):
     session = await _require_session(request, csrf=True)
     if session["role"] != "admin":
